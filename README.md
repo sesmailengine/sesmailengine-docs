@@ -6,6 +6,8 @@
 
 **Production-ready AWS email infrastructure that runs entirely in your account**
 
+🌐 **[Get SESMailEngine at sesmailengine.com](https://www.sesmailengine.com)** - Purchase, download, and get support
+
 SESMailEngine is AWS-native email infrastructure that solves the scattered email logic problem. Instead of managing email code across multiple Lambda functions, get a centralized solution that scales to zero when idle and avoids recurring monthly contracts.
 
 ## What We Built This For
