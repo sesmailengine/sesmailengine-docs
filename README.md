@@ -182,19 +182,95 @@ await client.send(command);
 - **[Performance Benchmarks](docs/benchmarks/)** - Load test results and industry comparisons
 ## Architecture
 
-**EventBridge → Lambda → SES** - Simple, serverless, and scalable
+**Production-grade email infrastructure with comprehensive monitoring and bounce protection**
 
 ```
-Your App → EventBridge → Email Sender Lambda → Amazon SES → Recipient
-                    ↓
-               DynamoDB (tracking) + S3 (templates) + SNS (feedback)
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              YOUR APPLICATION                                        │
+│  aws events put-events --event-bus-name {StackName}-EmailBus                        │
+│  --detail '{"to":"user@example.com", "templateName":"welcome", "templateData":{}}' │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                            AWS EVENTBRIDGE                                          │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
+│  │   Custom Event Bus  │  │    Event Rule       │  │   Dead Letter Queue │        │
+│  │   Retry Policy      │  │    Pattern Match    │  │   Failed Events     │        │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          EMAIL SENDER LAMBDA                                        │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
+│  │  Suppression Check  │  │  Template Rendering │  │   Bounce Rate Check │        │
+│  │  Email Validation   │  │  Jinja2 Processing  │  │   Daily Quota Limit │        │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                    │                         │                         │
+                    ▼                         ▼                         ▼
+┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
+│     DYNAMODB        │    │         S3          │    │        SES          │
+│                     │    │                     │    │                     │
+│  EmailTracking      │    │  Template Bucket    │    │  Configuration Set  │
+│  ├── Status         │    │  ├── HTML Templates │    │  ├── TLS Required   │
+│  ├── Timestamps     │    │  ├── Text Templates │    │  ├── Event Tracking │
+│  ├── Retry History  │    │  └── Metadata       │    │  └── Reputation     │
+│  └── 3 GSI Indexes  │    │                     │    │                     │
+│                     │    │  Versioning Enabled │    │  Sends to Recipients│
+│  Suppression Table  │    │  Encryption at Rest │    │  Publishes Events   │
+│  ├── Hard Bounces   │    │                     │    │                     │
+│  ├── Complaints     │    │                     │    │                     │
+│  └── Soft Bounce    │    │                     │    │                     │
+│      Exceeded       │    │                     │    │                     │
+└─────────────────────┘    └─────────────────────┘    └─────────────────────┘
+                                                                   │
+                                                                   │ SES Events
+                                                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                 AWS SNS                                              │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
+│  │   SES Feedback      │  │   Event Routing     │  │   Dead Letter Queue │        │
+│  │   bounce/complaint  │  │   delivery/open     │  │   Failed Processing │        │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                        FEEDBACK PROCESSOR LAMBDA                                    │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
+│  │   Bounce Handler    │  │   Status Updater    │  │   Retry Scheduler   │        │
+│  │   Hard/Soft Logic   │  │   Tracking Records  │  │   Soft Bounce Queue │        │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              AWS SQS RETRY QUEUE                                    │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
+│  │   Soft Bounce       │  │   15-min Delay      │  │   Dead Letter Queue │        │
+│  │   Retry Messages    │  │   Single Retry      │  │   Failed Retries    │        │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        │ Triggers Email Sender Lambda
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                           CLOUDWATCH ALARMS (6 ALARMS)                              │
+│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
+│  │   Bounce Rate >3%   │  │   DLQ Depth > 0     │  │   Lambda Errors     │        │
+│  │   Complaint >0.05%  │  │   All 3 DLQs        │  │   Sustained Issues  │        │
+│  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Benefits
-- **Serverless architecture** - Scales automatically, no servers to manage
-- **Scales to zero** - Pay only when you send, not for idle time
-- **Runs in your AWS account** - Full control, no external dependencies
-- **Zero data loss** - Every email tracked with comprehensive audit trails
+- **Zero data loss architecture** - 3 Dead Letter Queues capture all failures
+- **Intelligent bounce handling** - Automatic suppression with soft bounce retries
+- **Comprehensive monitoring** - 6 CloudWatch alarms protect your reputation
+- **Scales to zero** - Pay only when you send, serverless throughout
+- **Runs in your AWS account** - Full control, complete audit trail
 
 **→ [Complete Architecture Guide](docs/ARCHITECTURE.md)** - Detailed diagrams, data flow, and component interactions
 ## AI-Optimized Documentation
