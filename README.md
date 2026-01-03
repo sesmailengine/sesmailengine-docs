@@ -10,15 +10,77 @@
 
 SESMailEngine is AWS-native email infrastructure that solves the scattered email logic problem. Instead of managing email code across multiple Lambda functions, get a centralized solution that scales to zero when idle and avoids recurring monthly contracts.
 
-## What We Built This For
+## The SES Reputation Problem
 
-While building production SaaS applications on AWS, we faced a common problem: **email logic scattered across multiple Lambda functions**. We needed a centralized solution that:
+**Amazon SES is cheap, powerful, and reliable — until your reputation drops.**
 
-- **Runs entirely in our AWS account** - Full control, no external dependencies
+Most SES reputation damage doesn't come from spam campaigns. It comes from **architecture mistakes**: too many services sending email independently, no shared suppression logic, and no central visibility into bounces or complaints.
+
+### Why This Happens
+
+Most AWS architectures evolve like this:
+- Service A sends password reset emails
+- Service B sends invoices  
+- Service C sends notifications
+- Each has its own Lambda, each calls `SendEmail` directly
+
+This feels fine at first. But now you have:
+- ❌ No single place to enforce suppression
+- ❌ No shared bounce-rate logic
+- ❌ No consistent tracking
+- ❌ No way to stop bad sends centrally
+
+**SES reputation is account-wide.** One misbehaving Lambda, one bad import, one forgotten suppression check can silently damage everything that sends email from your account.
+
+### What AWS Tells You
+
+AWS recommends you build proper email infrastructure:
+
+> *"Send only high-quality emails to recipients who expect to hear from you."*
+> — [AWS SES Best Practices](https://docs.aws.amazon.com/ses/latest/dg/tips-and-best-practices.html)
+
+> *"Set up a process to handle bounces and complaints."*
+> — [Monitoring Sending Activity](https://docs.aws.amazon.com/ses/latest/dg/monitor-sending-activity.html)
+
+### What SES Gives You vs. What It Doesn't
+
+| SES Provides | SES Does NOT Provide |
+|--------------|---------------------|
+| Bounce & complaint events | Enforcement across services |
+| Suppression lists | Central sending policies |
+| Reputation metrics | Shared bounce-rate logic |
+| Event publishing | Protection from architecture mistakes |
+
+**AWS assumes you will build the control plane. Most teams don't.**
+
+### The Core Principle
+
+To protect SES reputation, you need **one central sending path**.
+
+Not: *"Every service can send email"*
+
+But: *"Every service requests an email to be sent"*
+
+That single change unlocks everything.
+
+## What We Built
+
+We ran into this problem ourselves while operating multiple AWS workloads using SES. When no existing solution met our requirements, we built SESMailEngine — a centralised email infrastructure that actively protects your reputation.
+
+**SESMailEngine implements the "one sender, many producers" pattern:**
+
+- ✅ **Single sending path** - All emails flow through one controlled system
+- ✅ **Shared suppression** - One suppression table protects all services
+- ✅ **Central bounce handling** - Automatic hard/soft bounce logic
+- ✅ **Cross-campaign protection** - Bad addresses blocked everywhere
+- ✅ **Real-time monitoring** - 6 CloudWatch alarms catch problems early
+- ✅ **Zero data loss** - 3 Dead Letter Queues capture every failure
+
+### Why We Built It This Way
+
+- **Runs entirely in your AWS account** - Full control, no external dependencies
 - **Scales to zero when idle** - Pay only when you send, not monthly fees
 - **Avoids recurring contracts** - One-time purchase, unlimited projects
-
-When no existing solution met these requirements, we built SESMailEngine.
 
 ## What We Are
 
