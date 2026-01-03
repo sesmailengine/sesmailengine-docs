@@ -1,0 +1,49 @@
+# SESMailEngine Documentation License
+
+Copyright (c) 2024-2026 SESMailEngine. All rights reserved.
+
+## Documentation Usage
+
+The documentation in this repository is provided for:
+- Evaluating SESMailEngine before purchase
+- Reference during integration and development
+- Understanding system architecture and capabilities
+
+You may:
+- Read and reference this documentation
+- Share links to this repository
+- Use code examples for integration with a licensed copy of SESMailEngine
+
+## Product License
+
+SESMailEngine is a commercial product. To use SESMailEngine, you must purchase a license at:
+
+**https://www.sesmailengine.com**
+
+### License Grant
+
+Subject to purchase and these terms, we grant you a non-exclusive, non-transferable license to:
+
+- Deploy SESMailEngine to unlimited projects you own or control
+- Use SESMailEngine for personal and commercial projects
+- Modify the CloudFormation templates and configuration for your needs
+- Create custom email templates using the provided framework
+
+### License Restrictions
+
+You may NOT:
+
+- Resell, redistribute, or sublicense SESMailEngine
+- Share your download with others (each user needs their own license)
+- Remove or modify copyright notices
+- Reverse engineer or attempt to extract source code beyond what is provided
+- Use SESMailEngine for illegal activities or spam
+- Deploy SESMailEngine on behalf of third parties without separate licenses
+
+### Disclaimer
+
+THE SOFTWARE AND DOCUMENTATION ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Contact
+
+For licensing questions: https://www.sesmailengine.com/terms
