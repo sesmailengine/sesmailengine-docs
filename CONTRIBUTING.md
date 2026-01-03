@@ -6,7 +6,7 @@ Thank you for your interest in improving SESMailEngine documentation!
 
 If you find errors, unclear explanations, or outdated information in our documentation:
 
-1. **Check existing issues** - Search GitHub Issues to see if it's already reported
+1. **Check existing issues** - Search [GitHub Issues](https://github.com/sesmailengine/sesmailengine-docs/issues) to see if it's already reported
 2. **Create a new issue** with:
    - The documentation file and section affected
    - What's incorrect or unclear
@@ -52,4 +52,4 @@ This repository contains documentation only. The SESMailEngine product source co
 
 ---
 
-**Repository Setup Note:** Update the GitHub Issues link above once you create the specific repository (e.g., `sesmailengine-docs` or `docs`) under your GitHub organization.
+**Note:** This repository contains documentation only. The SESMailEngine product source code is distributed separately to licensed customers.

@@ -263,7 +263,7 @@ The `docs/ai/` directory contains structured documentation optimized for AI agen
 ### 📚 Documentation Issues
 Found an error in our documentation? Have a suggestion for improvement?
 
-**[Report Documentation Issues](../../issues)** - Help us improve these docs for everyone
+**[Report Documentation Issues](https://github.com/sesmailengine/sesmailengine-docs/issues)** - Help us improve these docs for everyone
 
 ### 💬 Support
 - **Product support:** Available at [sesmailengine.com](https://www.sesmailengine.com)
