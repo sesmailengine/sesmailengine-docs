@@ -557,3 +557,46 @@ aws cloudformation describe-stacks --stack-name {STACK} \
 - `{STACK}-FeedbackProcessorErrorsAlarm` - Feedback Processor Lambda errors
 - `{STACK}-SESBounceRateAlarm` - SES bounce rate > 3%
 - `{STACK}-SESComplaintRateAlarm` - SES complaint rate > 0.05%
+
+---
+
+## Status Notification Queries
+
+### Check if status notifications are enabled
+```bash
+# Notifications are enabled if EVENT_BUS_NAME env var is set
+aws lambda get-function-configuration \
+  --function-name {STACK}-FeedbackProcessor \
+  --query 'Environment.Variables.EVENT_BUS_NAME'
+```
+
+### Find status notification errors in logs
+```bash
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/{STACK}-FeedbackProcessor \
+  --filter-pattern "Failed to publish status" \
+  --start-time $(date -d '1 hour ago' +%s000)
+```
+
+### List EventBridge rules subscribed to status notifications
+```bash
+aws events list-rules \
+  --event-bus-name {STACK}-EmailBus \
+  --query 'Rules[?contains(EventPattern, `Email Status Changed`)].{Name:Name,State:State}'
+```
+
+### Test status notification event pattern
+```bash
+# Verify your rule pattern matches status events
+aws events test-event-pattern \
+  --event-pattern '{
+    "source": ["sesmailengine"],
+    "detail-type": ["Email Status Changed"],
+    "detail": {"status": ["bounced"]}
+  }' \
+  --event '{
+    "source": "sesmailengine",
+    "detail-type": "Email Status Changed",
+    "detail": {"status": "bounced", "emailId": "test-123"}
+  }'
+```

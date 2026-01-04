@@ -227,7 +227,7 @@ await client.send(command);
 | Mailgun | 5,000 events/sec | 0.100% | $35+ |
 | Postmark | 500 events/sec | 0.010% | $15+ |
 
-**→ [Detailed Benchmark Report](docs/benchmarks/)** - Complete load test results and methodology
+**→ [Detailed Performance Information](docs/ARCHITECTURE.md#performance-characteristics)** - Complete throughput and cost analysis
 ## Documentation
 
 ### Getting Started
@@ -243,10 +243,58 @@ await client.send(command);
 ### Reference Materials
 - **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues, error codes, and solutions
 - **[AI Documentation](docs/ai/)** - Structured docs optimized for AI coding assistants and LLMs
-- **[Performance Benchmarks](docs/benchmarks/)** - Load test results and industry comparisons
+## Email Status Notification Relay
+
+**Real-time status updates via EventBridge Fan-Out**
+
+SESMailEngine publishes email status change events back to EventBridge, enabling your services to receive real-time notifications about delivery, bounces, complaints, and opens.
+
+```
+Your App → EventBridge → SESMailEngine → SES → Recipient
+                ↑                           ↓
+                └──── Status Notifications ←┘
+```
+
+### How It Works
+
+When an email status changes, the Feedback Processor publishes an "Email Status Changed" event to the same EventBridge bus. Your services create rules to subscribe to these events.
+
+### Available Status Events
+- **delivered** - Email successfully delivered to recipient's mail server
+- **bounced** - Permanent delivery failure (address doesn't exist)
+- **soft_bounced** - Temporary failure (mailbox full, will retry)
+- **complained** - Recipient marked email as spam
+- **opened** - Recipient opened the email
+
+### Subscribe to Status Updates
+
+Create an EventBridge rule to receive notifications:
+
+```bash
+# Subscribe to bounce notifications for your service
+aws events put-rule \
+  --name "my-app-bounce-notifications" \
+  --event-bus-name "sesmailengine-EmailBus" \
+  --event-pattern '{
+    "source": ["sesmailengine"],
+    "detail-type": ["Email Status Changed"],
+    "detail": {
+      "status": ["bounced"],
+      "originalSource": ["my.application"]
+    }
+  }'
+```
+
+### Use Cases
+- **Update user records** when emails bounce permanently
+- **Trigger workflows** when important emails are delivered
+- **Track engagement** by monitoring email opens
+- **Alert on complaints** to prevent reputation damage
+
+**→ [Complete Status Notification Guide](docs/INTEGRATION.md#receiving-status-notifications)** - Full event schema, code examples, and best practices
 ## Architecture
 
-**Production-grade email infrastructure with comprehensive monitoring and bounce protection**
+**Production-grade email infrastructure with comprehensive monitoring, bounce protection, and real-time status notifications**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
@@ -259,12 +307,12 @@ await client.send(command);
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                            AWS EVENTBRIDGE                                          │
 │  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
-│  │   Custom Event Bus  │  │    Event Rule       │  │   Dead Letter Queue │        │
-│  │   Retry Policy      │  │    Pattern Match    │  │   Failed Events     │        │
+│  │   Custom Event Bus  │  │    Event Rules      │  │   Dead Letter Queue │        │
+│  │   Bidirectional     │  │    Send + Receive   │  │   Failed Events     │        │
 │  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
 └─────────────────────────────────────────────────────────────────────────────────────┘
-                                        │
-                                        ▼
+                          │                                     ▲
+                          ▼                                     │
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                          EMAIL SENDER LAMBDA                                        │
 │  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
@@ -304,12 +352,12 @@ await client.send(command);
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                        FEEDBACK PROCESSOR LAMBDA                                    │
 │  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
-│  │   Bounce Handler    │  │   Status Updater    │  │   Retry Scheduler   │        │
-│  │   Hard/Soft Logic   │  │   Tracking Records  │  │   Soft Bounce Queue │        │
+│  │   Bounce Handler    │  │   Status Updater    │  │  Status Notifier    │        │
+│  │   Hard/Soft Logic   │  │   Tracking Records  │  │  → EventBridge      │        │
 │  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘        │
 └─────────────────────────────────────────────────────────────────────────────────────┘
-                                        │
-                                        ▼
+                          │                                     │
+                          ▼                                     │ "Email Status Changed"
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                              AWS SQS RETRY QUEUE                                    │
 │  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐        │
@@ -333,6 +381,7 @@ await client.send(command);
 - **Zero data loss architecture** - 3 Dead Letter Queues capture all failures
 - **Intelligent bounce handling** - Automatic suppression with soft bounce retries
 - **Comprehensive monitoring** - 6 CloudWatch alarms protect your reputation
+- **Real-time status notifications** - EventBridge fan-out for delivery, bounce, and open events
 - **Scales to zero** - Pay only when you send, serverless throughout
 - **Runs in your AWS account** - Full control, complete audit trail
 

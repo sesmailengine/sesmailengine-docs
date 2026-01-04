@@ -302,6 +302,33 @@ Each error entry contains:
 - **Cause**: Tracking record doesn't exist for this SES message
 - **Doc**: TROUBLESHOOTING.md#feedback-processor-errors
 
+### FBK007
+- **Pattern**: `Failed to publish status change event: (.+)`
+- **Severity**: warning (non-blocking)
+- **Tracked**: yes (status update succeeded)
+- **Category**: feedback
+- **Cause**: EventBridge PutEvents failed for status notification
+- **Note**: Status notifications are best-effort. The tracking record is updated successfully, but the EventBridge notification to consumer services failed. Consumer services should query the tracking table for authoritative status.
+- **Doc**: INTEGRATION.md#receiving-status-notifications
+
+### FBK008
+- **Pattern**: `Failed to publish status notification: (.+)`
+- **Severity**: warning (non-blocking)
+- **Tracked**: yes (status update succeeded)
+- **Category**: feedback
+- **Cause**: Exception during status notification publishing
+- **Note**: Status notifications are best-effort. The tracking record is updated successfully, but the notification failed. This does not affect email delivery or tracking.
+- **Doc**: INTEGRATION.md#receiving-status-notifications
+
+### FBK009
+- **Pattern**: `Cannot publish notification: no tracking record for (.+)`
+- **Severity**: warning (non-blocking)
+- **Tracked**: no (record missing)
+- **Category**: feedback
+- **Cause**: Attempted to publish status notification but tracking record not found
+- **Note**: This can happen if the tracking record was deleted (TTL expired) or if there's a race condition. The status update is skipped.
+- **Doc**: INTEGRATION.md#receiving-status-notifications
+
 ---
 
 ## Template Seeder Errors (SEED)

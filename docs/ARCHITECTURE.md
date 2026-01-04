@@ -151,19 +151,44 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 │   │  1. Parse SNS notification                                                       │  │
 │   │  2. Extract notification type (bounce/complaint/delivery/open)                   │  │
 │   │  3. Route to appropriate processor                                               │  │
+│   │  4. Publish "Email Status Changed" event to EventBridge                         │  │
 │   └─────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
 │   Processors:                                                                           │
-│   ├── bounce_processor.py     - Hard bounce → suppress, Soft bounce → retry/suppress   │
-│   ├── complaint_processor.py  - Add to suppression list                                │
-│   ├── tracking_updater.py     - Update status (delivered, opened, bounced, etc.)       │
-│   ├── suppression_updater.py  - Add entries to suppression table                       │
-│   ├── retry_scheduler.py      - Schedule soft bounce retries via SQS                   │
-│   └── utils.py                - SNS parsing, bounce type detection, status priority    │
+│   ├── bounce_processor.py       - Hard bounce → suppress, Soft bounce → retry/suppress │
+│   ├── complaint_processor.py    - Add to suppression list                              │
+│   ├── tracking_updater.py       - Update status (delivered, opened, bounced, etc.)     │
+│   ├── suppression_updater.py    - Add entries to suppression table                     │
+│   ├── retry_scheduler.py        - Schedule soft bounce retries via SQS                 │
+│   ├── notification_publisher.py - Publish status changes to EventBridge                │
+│   └── utils.py                  - SNS parsing, bounce type detection, status priority  │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                               │
-                                              │ Soft Bounce Retry
-                                              ▼
+                    ┌─────────────────────────┼─────────────────────────┐
+                    │                         │                         │
+                    │ Soft Bounce Retry       │ Status Notifications    │
+                    ▼                         ▼                         │
+┌───────────────────────────────┐  ┌───────────────────────────────┐   │
+│          AWS SQS              │  │       AWS EVENTBRIDGE         │   │
+│                               │  │                               │   │
+│  Retry Queue:                 │  │  "Email Status Changed"       │   │
+│  {StackName}-EmailRetryQueue  │  │  events published to          │   │
+│                               │  │  {StackName}-EmailBus         │   │
+│  ├── Visibility Timeout: 45s  │  │                               │   │
+│  ├── Message Retention: 14d   │  │  Consumer services create     │   │
+│  ├── Long Polling: 20s        │  │  rules to subscribe to        │   │
+│  └── DLQ: EmailRetryDLQ       │  │  status updates               │   │
+└───────────────────────────────┘  └───────────────────────────────┘   │
+          │                                     │                       │
+          │                                     ▼                       │
+          │                        ┌───────────────────────────────┐   │
+          │                        │   CUSTOMER SERVICES           │   │
+          │                        │                               │   │
+          │                        │   EventBridge rules filter    │   │
+          │                        │   by status, originalSource   │   │
+          │                        └───────────────────────────────┘   │
+          │                                                            │
+          ▼                                                            │
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                                    AWS SQS                                               │
 │                                                                                         │

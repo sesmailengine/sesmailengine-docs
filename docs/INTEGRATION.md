@@ -1006,6 +1006,195 @@ for subscriber in subscribers:
 
 ---
 
+## Receiving Status Notifications
+
+SESEmailEngine publishes email status change events to EventBridge, allowing your services to receive real-time notifications about delivery, bounces, complaints, and opens.
+
+### How It Works
+
+When an email status changes (delivered, bounced, complained, opened), the Feedback Processor publishes an "Email Status Changed" event to the same EventBridge bus used for sending emails. Your services can create EventBridge rules to subscribe to these events.
+
+```
+Your App → EventBridge → SESEmailEngine → SES → Recipient
+                ↑                           ↓
+                └──── Status Notifications ←┘
+```
+
+### Status Change Event Schema
+
+**Source**: `sesmailengine`
+**Detail Type**: `Email Status Changed`
+
+```json
+{
+  "source": "sesmailengine",
+  "detail-type": "Email Status Changed",
+  "detail": {
+    "emailId": "email-abc123",
+    "status": "delivered",
+    "toEmail": "recipient@example.com",
+    "timestamp": "2024-12-14T10:31:00Z",
+    "originalSource": "my.application",
+    "templateName": "welcome",
+    "subject": "Welcome to Our Service",
+    "sesMessageId": "0000014a-f896-4c47-b8da-f6f2e7b2c19a-000000",
+    "metadata": {
+      "campaignId": "welcome-2024",
+      "userId": "user-456"
+    }
+  }
+}
+```
+
+### Status-Specific Fields
+
+**For bounces (`status: "bounced"` or `status: "soft_bounced"`):**
+```json
+{
+  "status": "bounced",
+  "bounceType": "Permanent",
+  "bounceSubType": "NoEmail",
+  "bounceReason": "NoEmail"
+}
+```
+
+**For complaints (`status: "complained"`):**
+```json
+{
+  "status": "complained",
+  "complaintFeedbackType": "abuse"
+}
+```
+
+### Creating EventBridge Rules
+
+Create rules in your AWS account to subscribe to status notifications:
+
+**Subscribe to all status changes:**
+```json
+{
+  "source": ["sesmailengine"],
+  "detail-type": ["Email Status Changed"]
+}
+```
+
+**Subscribe to bounces only:**
+```json
+{
+  "source": ["sesmailengine"],
+  "detail-type": ["Email Status Changed"],
+  "detail": {
+    "status": ["bounced", "soft_bounced"]
+  }
+}
+```
+
+**Subscribe to events from your service only:**
+```json
+{
+  "source": ["sesmailengine"],
+  "detail-type": ["Email Status Changed"],
+  "detail": {
+    "originalSource": ["my.application"]
+  }
+}
+```
+
+### AWS CLI Example
+
+Create a rule to send bounce notifications to your Lambda:
+
+```bash
+# Create the rule
+aws events put-rule \
+  --name "my-app-bounce-notifications" \
+  --event-bus-name "sesmailengine-EmailBus" \
+  --event-pattern '{
+    "source": ["sesmailengine"],
+    "detail-type": ["Email Status Changed"],
+    "detail": {
+      "status": ["bounced"],
+      "originalSource": ["my.application"]
+    }
+  }'
+
+# Add your Lambda as target
+aws events put-targets \
+  --rule "my-app-bounce-notifications" \
+  --event-bus-name "sesmailengine-EmailBus" \
+  --targets "Id"="1","Arn"="arn:aws:lambda:us-east-1:123456789012:function:my-bounce-handler"
+```
+
+### IAM Policy for Creating Rules
+
+Your service needs permission to create rules on the SESEmailEngine event bus:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "events:PutRule",
+        "events:PutTargets",
+        "events:DeleteRule",
+        "events:RemoveTargets",
+        "events:DescribeRule"
+      ],
+      "Resource": "arn:aws:events:REGION:ACCOUNT_ID:rule/STACK_NAME-EmailBus/*"
+    }
+  ]
+}
+```
+
+### Python Handler Example
+
+Handle status notifications in your Lambda:
+
+```python
+def lambda_handler(event, context):
+    detail = event['detail']
+    
+    email_id = detail['emailId']
+    status = detail['status']
+    to_email = detail['toEmail']
+    metadata = detail.get('metadata', {})
+    
+    if status == 'bounced':
+        bounce_type = detail.get('bounceType')
+        bounce_reason = detail.get('bounceReason')
+        print(f"Hard bounce for {to_email}: {bounce_reason}")
+        # Update your user database, remove from mailing list, etc.
+        
+    elif status == 'soft_bounced':
+        print(f"Soft bounce for {to_email}, will retry automatically")
+        
+    elif status == 'complained':
+        print(f"Spam complaint from {to_email}")
+        # Immediately stop sending to this user
+        
+    elif status == 'delivered':
+        print(f"Email {email_id} delivered to {to_email}")
+        
+    elif status == 'opened':
+        print(f"Email {email_id} opened by {to_email}")
+    
+    return {'statusCode': 200}
+```
+
+### Best Practices
+
+1. **Filter by originalSource**: Only subscribe to events from your own service to avoid processing other services' notifications.
+
+2. **Handle idempotently**: Status events may be delivered more than once. Use `emailId` to deduplicate.
+
+3. **Don't block on notifications**: Status notifications are best-effort. Don't rely on them for critical business logic - query the tracking table for authoritative status.
+
+4. **Use metadata for correlation**: Include `campaignId`, `userId`, or other identifiers in metadata when sending emails to correlate notifications with your business entities.
+
+---
+
 ## Performance Benchmarks
 
 SESEmailEngine is designed for high-throughput email sending. Below are performance characteristics based on load testing with AWS SES simulator addresses.

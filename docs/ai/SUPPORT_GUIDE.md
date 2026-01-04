@@ -395,6 +395,76 @@ aws dynamodb scan --table-name {STACK}-EmailTracking \
 Note: Scans are expensive. For frequent queries, consider adding a GSI.
 ```
 
+### User asks: "How do I receive delivery notifications?"
+
+```
+SESEmailEngine publishes "Email Status Changed" events to EventBridge when emails
+are delivered, bounced, complained, or opened.
+
+1. Create an EventBridge rule to subscribe:
+   aws events put-rule \
+     --name "my-app-notifications" \
+     --event-bus-name {STACK}-EmailBus \
+     --event-pattern '{
+       "source": ["sesmailengine"],
+       "detail-type": ["Email Status Changed"],
+       "detail": {"originalSource": ["my.application"]}
+     }'
+
+2. Add your Lambda/SQS/SNS as target:
+   aws events put-targets \
+     --rule "my-app-notifications" \
+     --event-bus-name {STACK}-EmailBus \
+     --targets "Id"="1","Arn"="arn:aws:lambda:REGION:ACCOUNT:function:my-handler"
+
+3. Your handler receives events like:
+   {
+     "source": "sesmailengine",
+     "detail-type": "Email Status Changed",
+     "detail": {
+       "emailId": "email-123",
+       "status": "delivered",
+       "toEmail": "user@example.com",
+       "originalSource": "my.application",
+       "metadata": {...}
+     }
+   }
+
+Filter by status: "detail": {"status": ["bounced", "complained"]}
+Filter by your service: "detail": {"originalSource": ["my.application"]}
+
+See INTEGRATION.md#receiving-status-notifications for full details.
+```
+
+### User asks: "Why am I not receiving status notifications?"
+
+```
+1. Check if notifications are enabled:
+   aws lambda get-function-configuration \
+     --function-name {STACK}-FeedbackProcessor \
+     --query 'Environment.Variables.EVENT_BUS_NAME'
+   
+   If empty, notifications are disabled (shouldn't happen with default deployment).
+
+2. Check your EventBridge rule exists and is enabled:
+   aws events list-rules --event-bus-name {STACK}-EmailBus
+
+3. Check your rule's event pattern matches:
+   - source: "sesmailengine" (not your app name)
+   - detail-type: "Email Status Changed"
+   - detail.originalSource: your app's source (if filtering)
+
+4. Check for notification errors in logs:
+   aws logs filter-log-events \
+     --log-group-name /aws/lambda/{STACK}-FeedbackProcessor \
+     --filter-pattern "Failed to publish status"
+
+5. Verify your target has permission to be invoked by EventBridge.
+
+Note: Status notifications are best-effort. For authoritative status,
+query the tracking table directly.
+```
+
 ### User asks: "How do I get delivery statistics?"
 
 ```
@@ -539,7 +609,59 @@ To reduce these errors in future: Spread sends over time, or request an SES quot
 - Persistent throttling even with low volume
 - DLQ depth alarm triggered
 
-### Scenario 7: User receives CloudWatch alarm emails during burst loads
+### Scenario 7: Status notifications not being received
+
+**Symptom:** User set up EventBridge rules but isn't receiving status notifications.
+
+**Likely causes:**
+1. Rule event pattern doesn't match (wrong source or detail-type)
+2. Target doesn't have permission to be invoked
+3. Filtering by wrong originalSource value
+4. Notification publishing errors in Feedback Processor
+
+**Questions to ask:**
+- What's your EventBridge rule's event pattern?
+- What's the `source` value you use when sending emails?
+- Are you seeing any errors in Feedback Processor logs?
+
+**Diagnostic steps:**
+1. Verify rule exists and is enabled:
+   ```bash
+   aws events list-rules --event-bus-name {STACK}-EmailBus
+   ```
+
+2. Check rule event pattern:
+   - source must be `"sesmailengine"` (not your app name)
+   - detail-type must be `"Email Status Changed"`
+   - If filtering by originalSource, it must match your app's source exactly
+
+3. Check for notification errors:
+   ```bash
+   aws logs filter-log-events \
+     --log-group-name /aws/lambda/{STACK}-FeedbackProcessor \
+     --filter-pattern "Failed to publish status"
+   ```
+
+4. Verify target permissions (Lambda needs resource-based policy allowing EventBridge)
+
+**Response template:**
+```
+Status notifications use these event attributes:
+- source: "sesmailengine" (this is the publisher, not your app)
+- detail-type: "Email Status Changed"
+- detail.originalSource: your app's source value (e.g., "my.application")
+
+Your rule pattern should look like:
+{
+  "source": ["sesmailengine"],
+  "detail-type": ["Email Status Changed"],
+  "detail": {"originalSource": ["my.application"]}
+}
+
+Note: Status notifications are best-effort. For authoritative status, query the tracking table.
+```
+
+### Scenario 8: User receives CloudWatch alarm emails during burst loads
 
 **Symptom:** User receives alarm notification emails like:
 - "EmailSender-Errors has entered the ALARM state"
@@ -583,9 +705,11 @@ Let's check:
 
 ---
 
-## Response Templates
+## Troubleshooting Response Patterns
 
-### When providing a fix:
+These patterns show how to structure your investigation and what information to gather.
+
+### When you find the issue:
 
 ```
 I found the issue: [ERROR_CODE] - [Brief description]
@@ -603,10 +727,10 @@ I found the issue: [ERROR_CODE] - [Brief description]
 For more details, see: [Link to doc section]
 ```
 
-### When asking for more info:
+### When you need more info:
 
 ```
-I need a bit more information to help diagnose this:
+To diagnose this, gather:
 
 1. What is your stack name? (e.g., "my-email-engine")
 2. Do you have an emailId or recipient email address?
@@ -615,7 +739,7 @@ I need a bit more information to help diagnose this:
 Once I have this, I can query your tracking data to find the issue.
 ```
 
-### When issue is on recipient side:
+### When the issue is on recipient side:
 
 ```
 Good news: The email was delivered successfully!
@@ -664,6 +788,13 @@ This is outside SESMailEngine's control - the email left AWS successfully.
    - DLQ alarms indicate processing failures that need investigation
    - Lambda error alarms: >50 errors for 2 consecutive 5-minute periods (ignores burst throttling)
    - If Lambda alarm triggers, it's a real sustained problem - investigate immediately
+
+9. **Status Notifications**:
+   - Published to EventBridge when status changes (delivered, bounced, complained, opened)
+   - Source is `"sesmailengine"`, detail-type is `"Email Status Changed"`
+   - `originalSource` field contains the customer's original source value for filtering
+   - Notifications are best-effort - query tracking table for authoritative status
+   - Consumer services create their own EventBridge rules to subscribe
 
 
 ---

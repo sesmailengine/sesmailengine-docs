@@ -1,69 +1,81 @@
-# AI Agent Reference Documentation
+# AI-Assisted Troubleshooting
 
-This folder contains structured documentation optimized for AI support agents.
+This folder contains documentation optimized for AI assistants (ChatGPT, Claude, Copilot, etc.) to help you troubleshoot SESMailEngine issues.
 
-## Purpose
+## How to Use
 
-These documents are designed to be included in AI agent context when helping users troubleshoot SESMailEngine issues. They complement the user-facing docs in `docs/` with machine-parseable formats and decision trees.
+Point your AI assistant to these files when you need help:
+
+```
+Please read these SESMailEngine docs and help me troubleshoot:
+- https://github.com/YOUR_ORG/sesmailengine/blob/main/docs/ai/ERROR_INDEX.md
+- https://github.com/YOUR_ORG/sesmailengine/blob/main/docs/ai/SUPPORT_GUIDE.md
+```
+
+Or copy the file contents directly into your AI chat.
 
 ## Files
 
 | File | Purpose | When to Use |
 |------|---------|-------------|
-| `ERROR_INDEX.md` | Error code catalog with regex patterns | Match user error messages |
-| `DIAGNOSTIC_QUERIES.md` | AWS CLI commands for investigation | Query customer's AWS resources |
-| `SUPPORT_GUIDE.md` | Decision trees, "how do I" answers, response templates | Guide diagnosis flow |
-| `FEATURE_GUIDE.md` | Feature explanations, use cases, system behavior | Answer "how does X work?" questions |
+| `ERROR_INDEX.md` | Error code catalog with causes and fixes | "I'm getting this error..." |
+| `DIAGNOSTIC_QUERIES.md` | AWS CLI commands to investigate issues | "How do I check if..." |
+| `SUPPORT_GUIDE.md` | Step-by-step troubleshooting guides | "My email isn't being delivered" |
+| `FEATURE_GUIDE.md` | Feature explanations and how-to guides | "How do I..." |
 
-## Usage
+## Example Prompts
 
-### For AI Agent Prompts
-
-Include these files in your AI agent's context:
-
+### Troubleshooting an Error
 ```
-You are a support agent for SESMailEngine. You have access to:
+I'm using SESMailEngine and getting this error:
+"Template 'welcome' not found in bucket"
 
-1. docs/ai/ERROR_INDEX.md - Error patterns and codes
-2. docs/ai/DIAGNOSTIC_QUERIES.md - AWS CLI diagnostic queries  
-3. docs/ai/SUPPORT_GUIDE.md - Diagnosis decision trees and "how do I" answers
-4. docs/ai/FEATURE_GUIDE.md - Feature explanations and use cases
+[Paste ERROR_INDEX.md content]
 
-When a user reports an issue:
-1. Match their error against ERROR_INDEX.md
-2. Follow the decision tree in SUPPORT_GUIDE.md
-3. Provide diagnostic queries from DIAGNOSTIC_QUERIES.md
-4. Link to user-facing docs for detailed explanations
-
-When a user asks "how do I...":
-1. Check SUPPORT_GUIDE.md for common "how do I" questions
-2. Check FEATURE_GUIDE.md for detailed feature explanations
-3. Provide step-by-step instructions with example commands
+What's wrong and how do I fix it?
 ```
 
-### Token Budget
+### Understanding a Feature
+```
+I want to set up different sender addresses for different email types in SESMailEngine.
 
-| File | Lines | Chars | ~Tokens |
-|------|-------|-------|---------|
-| ERROR_INDEX.md | ~250 | ~8K | ~2K |
-| DIAGNOSTIC_QUERIES.md | ~280 | ~9K | ~2.5K |
-| SUPPORT_GUIDE.md | ~350 | ~12K | ~3K |
-| FEATURE_GUIDE.md | ~400 | ~14K | ~3.5K |
-| **Total** | ~1280 | ~43K | ~11K |
+[Paste FEATURE_GUIDE.md content]
 
-All four files fit in most LLM context windows (fits easily in 16K+ contexts).
+How should I configure this?
+```
 
-## Maintenance
+### Diagnosing Delivery Issues
+```
+My emails aren't being delivered. The tracking table shows status "failed".
 
-When adding new features:
-1. Add error patterns to `ERROR_INDEX.md`
-2. Add diagnostic queries to `DIAGNOSTIC_QUERIES.md`
-3. Update decision trees in `SUPPORT_GUIDE.md`
-4. Keep user-facing docs in `docs/` updated separately
+[Paste SUPPORT_GUIDE.md content]
 
-## Not for Users
+Help me diagnose the issue.
+```
 
-These files are internal reference for AI agents. Users should be directed to:
-- `docs/TROUBLESHOOTING.md` for error explanations
-- `docs/INTEGRATION.md` for usage examples
-- `docs/SETUP.md` for deployment help
+## Token Budget
+
+All files are designed to fit in most AI context windows:
+
+| File | ~Tokens |
+|------|---------|
+| ERROR_INDEX.md | ~2K |
+| DIAGNOSTIC_QUERIES.md | ~2.5K |
+| SUPPORT_GUIDE.md | ~3K |
+| FEATURE_GUIDE.md | ~3.5K |
+| **Total** | ~11K |
+
+You can include all four files in a single conversation with most AI models.
+
+## Tips for Best Results
+
+1. **Include the relevant file** - Don't just describe your problem; give the AI the reference docs
+2. **Provide your stack name** - Replace `{STACK}` in commands with your actual stack name
+3. **Share error messages** - Copy the exact error text, not a summary
+4. **Include context** - What were you trying to do when the error occurred?
+
+## Also See
+
+- `docs/TROUBLESHOOTING.md` - Human-readable troubleshooting guide
+- `docs/INTEGRATION.md` - Integration examples and event formats
+- `docs/SETUP.md` - Deployment and configuration
