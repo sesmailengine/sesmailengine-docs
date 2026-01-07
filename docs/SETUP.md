@@ -78,53 +78,87 @@ python install.py
 The installer will guide you through the setup process:
 
 ```
-╔══════════════════════════════════════════════════════════════╗
-║           SESMailEngine Installer v1.0.0                     ║
-╚══════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   SESMailEngine Installer v1.0.0                              ║
+║   Serverless Email Infrastructure for AWS                     ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
 
-Step 1/7: Checking prerequisites...
-  ✓ Python 3.11 detected
-  ✓ AWS credentials configured
-  ✓ Region: eu-west-2
+Checking prerequisites...
+✓ All prerequisites met
+✓ AWS Region: eu-west-2
+✓ AWS Account: 123456789012
 
-Step 2/7: Collecting configuration...
-  Enter S3 bucket name for deployment: my-company-sesmailengine
-  Enter your verified SES email: noreply@mycompany.com
-  Enter admin email for alerts: admin@mycompany.com
-  Enter sender display name [SESMailEngine]: My Company
-  Enter stack name [sesmailengine]: 
+⚠ IMPORTANT: SES Region Alignment
+────────────────────────────────────────
+  SESMailEngine will be deployed to: eu-west-2
+  Your SES verified identities (domains/emails) must be in the SAME region.
 
-Step 3/7: Creating S3 bucket...
-  ✓ Bucket 'my-company-sesmailengine' created in eu-west-2
+Is eu-west-2 the correct region for your SES setup? [Y/n]: 
 
-Step 4/7: Uploading files...
-  ✓ Uploaded lambda/email-sender.zip
-  ✓ Uploaded lambda/feedback-processor.zip
-  ✓ Uploaded lambda/template-seeder.zip
-  ✓ Uploaded 8 starter templates
+Configuration
+────────────────────────────────────────
+S3 bucket name for Lambda code [sesmailengine-123456789012-eu-west-2]: my-company-sesmailengine
+Default sender email (must be verified in SES): noreply@mycompany.com
+Admin email for CloudWatch alerts: admin@mycompany.com
+Default sender name [SESMailEngine]: My Company
+CloudFormation stack name [sesmailengine]: 
 
-Step 5/7: Deploying CloudFormation stack...
-  Creating stack 'sesmailengine'...
-  ⏳ Waiting for stack creation (this takes 2-3 minutes)...
-  ✓ Stack created successfully!
+Configuration Summary
+────────────────────────────────────────
+  S3 Bucket:      my-company-sesmailengine
+  Sender Email:   noreply@mycompany.com
+  Admin Email:    admin@mycompany.com
+  Sender Name:    My Company
+  Stack Name:     sesmailengine
+  Region:         eu-west-2
 
-Step 6/7: Installing starter templates...
-  ✓ Installed 8 email templates
+Proceed with installation? [Y/n]: 
 
-Step 7/7: Complete!
+[1/7] Creating S3 bucket...
+✓ Created S3 bucket: my-company-sesmailengine
 
-╔══════════════════════════════════════════════════════════════╗
-║                    Installation Complete!                     ║
-╚══════════════════════════════════════════════════════════════╝
+[2/7] Uploading Lambda packages...
+  Uploading email-sender.zip...
+  Uploading feedback-processor.zip...
+  Uploading template-seeder.zip...
+✓ Uploaded all Lambda packages
+
+[3/7] Uploading starter templates...
+✓ Uploaded 8 starter templates
+
+[4/7] Deploying CloudFormation stack...
+✓ Started CloudFormation stack creation: sesmailengine
+
+[5/7] Waiting for stack creation...
+  Waiting for stack creation (this takes 2-3 minutes)...
+✓ Stack created successfully
+
+[6/7] Retrieving stack outputs...
+✓ Retrieved stack configuration
+
+[7/7] Installing starter templates...
+✓ Installed 8 starter templates: welcome, password-reset, ...
+
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   Installation Complete!                                      ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
 
 Your SESMailEngine is ready to use!
 
-EventBridge Bus: sesmailengine-EmailBus
-Template Bucket: sesmailengine-templates-123456789012
+EventBridge Bus ARN:
+  arn:aws:events:eu-west-2:123456789012:event-bus/sesmailengine-EmailBus
 
-Next steps:
-1. Grant your applications access (see docs/INTEGRATION.md)
-2. Send your first email (see below)
+Template Bucket:
+  sesmailengine-templates-123456789012
+
+Next Steps:
+  1. Verify your sender email in SES (if not already done)
+  2. Attach the IAM policy to your application (see docs/INTEGRATION.md)
+  3. Send your first email via EventBridge
 
 Need help? Visit https://sesmailengine.com/support
 ```
@@ -158,34 +192,53 @@ print(f"Event sent: {response}")
 
 ---
 
-## Installer Options
+## Installer Commands
 
-### View Help
+### Command Reference
+
+| Command | Result |
+|---------|--------|
+| `python install.py` | Interactive install - prompts for all configuration values |
+| `python install.py --help` | Show help message with available options |
+| `python install.py --version` | Show installer version |
+| `python install.py --uninstall` | Uninstall stack named "sesmailengine" (default) |
+| `python install.py --uninstall --stack-name mystack` | Uninstall a specific stack by name |
+| `python install.py --uninstall --delete-bucket` | Uninstall + also delete the S3 template bucket |
+
+### Region Selection
+
+The installer uses your AWS region in this order of priority:
+
+1. `AWS_REGION` environment variable (if set)
+2. `AWS_DEFAULT_REGION` environment variable (if set)
+3. Region from your AWS CLI configuration (`~/.aws/config`)
+
+To deploy to a specific region, set it before running the installer:
 
 ```bash
-python install.py --help
+# Option 1: Environment variable (recommended)
+export AWS_REGION=eu-west-1
+python install.py
+
+# Option 2: AWS CLI config
+aws configure set region eu-west-1
+python install.py
 ```
 
-### Non-Interactive Mode
-
-For CI/CD or scripted deployments:
-
-```bash
-python install.py \
-  --bucket my-company-sesmailengine \
-  --sender-email noreply@mycompany.com \
-  --admin-email admin@mycompany.com \
-  --sender-name "My Company" \
-  --stack-name sesmailengine \
-  --region eu-west-2
-```
+The installer will display the detected region and ask you to confirm before proceeding.
 
 ### Uninstall
 
 To remove SESMailEngine:
 
 ```bash
-python install.py --uninstall --stack-name sesmailengine
+python install.py --uninstall
+```
+
+To uninstall a stack with a custom name:
+
+```bash
+python install.py --uninstall --stack-name mystack
 ```
 
 This deletes the CloudFormation stack. By default, your data is preserved:
@@ -195,7 +248,7 @@ This deletes the CloudFormation stack. By default, your data is preserved:
 To also delete the S3 bucket:
 
 ```bash
-python install.py --uninstall --stack-name sesmailengine --delete-bucket
+python install.py --uninstall --delete-bucket
 ```
 
 ---
@@ -332,6 +385,32 @@ aws cloudformation describe-stacks \
 
 See [INTEGRATION.md](INTEGRATION.md) for detailed IAM setup instructions.
 
+### Subscribe to Email Status Notifications (Optional)
+
+SESEmailEngine publishes "Email Status Changed" events when emails are delivered, bounced, or marked as spam. Your services can subscribe to these events to:
+- Update user records when emails bounce
+- Track delivery confirmations
+- Handle spam complaints immediately
+
+Create an EventBridge rule to receive notifications:
+
+```bash
+aws events put-rule \
+  --name "my-app-email-notifications" \
+  --event-bus-name "sesmailengine-EmailBus" \
+  --event-pattern '{
+    "source": ["sesmailengine"],
+    "detail-type": ["Email Status Changed"],
+    "detail": {
+      "originalSource": ["my.application"]
+    }
+  }'
+```
+
+The `originalSource` field matches the `source` you used when sending emails, so you only receive notifications for your own emails.
+
+See [INTEGRATION.md](INTEGRATION.md#receiving-status-notifications) for complete examples including Lambda handlers and IAM policies.
+
 ---
 
 ## Stack Outputs
@@ -452,14 +531,36 @@ aws s3 rb s3://my-company-sesmailengine --force
 
 ---
 
-## Advanced: Manual Deployment
+## Advanced: Manual Deployment (CLI)
 
 For users who prefer manual deployment or need custom configurations.
+
+**Important:** Replace `YOUR_REGION` with the AWS region where your SES identities are verified (e.g., `us-east-1`, `eu-west-1`).
+
+**Package Structure:** After extracting `sesmailengine-v1.0.0.zip`, you'll have:
+```
+sesmailengine-v1.0.0/
+├── install.py           # Automated installer
+├── requirements.txt     # Python dependencies (boto3)
+├── template.yaml        # CloudFormation template
+├── README.md
+├── docs/                # Documentation
+├── lambda/              # Lambda ZIP packages
+│   ├── email-sender.zip
+│   ├── feedback-processor.zip
+│   └── template-seeder.zip
+└── starter-templates/   # Email templates
+    ├── welcome/
+    ├── password-reset/
+    └── ... (8 template folders)
+```
+
+Run all commands from inside the `sesmailengine-v1.0.0` folder.
 
 ### Step 1: Create S3 Bucket
 
 ```bash
-aws s3 mb s3://my-company-sesmailengine --region eu-west-2
+aws s3 mb s3://my-company-sesmailengine --region YOUR_REGION
 ```
 
 ### Step 2: Upload Files
@@ -480,6 +581,7 @@ aws s3 cp starter-templates/ s3://my-company-sesmailengine/starter-templates/ --
 aws cloudformation create-stack \
   --stack-name sesmailengine \
   --template-body file://template.yaml \
+  --region YOUR_REGION \
   --parameters \
     ParameterKey=LambdaCodeS3Bucket,ParameterValue=my-company-sesmailengine \
     ParameterKey=AdminEmail,ParameterValue=admin@mycompany.com \
@@ -488,7 +590,7 @@ aws cloudformation create-stack \
   --capabilities CAPABILITY_NAMED_IAM
 
 # Wait for completion
-aws cloudformation wait stack-create-complete --stack-name sesmailengine
+aws cloudformation wait stack-create-complete --stack-name sesmailengine --region YOUR_REGION
 ```
 
 ### Step 4: Install Templates
@@ -496,8 +598,100 @@ aws cloudformation wait stack-create-complete --stack-name sesmailengine
 ```bash
 aws lambda invoke \
   --function-name sesmailengine-TemplateSeeder \
+  --region YOUR_REGION \
   --output text /dev/stdout
 ```
+
+---
+
+## Advanced: Manual Deployment (AWS Console)
+
+For users who prefer using the AWS web console instead of CLI.
+
+**Important:** Deploy to the same region where your SES identities (domains/emails) are verified.
+
+### Step 1: Create S3 Bucket
+
+1. Log in to the [AWS Console](https://console.aws.amazon.com/)
+2. Make sure you're in the correct region (check top-right corner, e.g., "EU (Ireland)")
+3. Go to **S3** (search "S3" in the search bar)
+4. Click **Create bucket**
+5. Enter a bucket name: `my-company-sesmailengine` (must be globally unique)
+6. Leave all other settings as default
+7. Click **Create bucket**
+
+### Step 2: Upload Lambda Packages
+
+1. Click on your newly created bucket to open it
+2. Click **Create folder**, name it `lambda`, click **Create folder**
+3. Click into the `lambda` folder
+4. Click **Upload**
+5. Click **Add files** and select these 3 files from your extracted `sesmailengine-v1.0.0/lambda/` folder:
+   - `email-sender.zip`
+   - `feedback-processor.zip`
+   - `template-seeder.zip`
+6. Click **Upload**
+7. Wait for upload to complete, then click **Close**
+
+### Step 3: Upload Starter Templates
+
+1. Go back to your bucket root (click bucket name in breadcrumb)
+2. Click **Create folder**, name it `starter-templates`, click **Create folder**
+3. Click into the `starter-templates` folder
+4. For each template folder (`welcome`, `password-reset`, `purchase-confirmation`, `email-verification`, `invoice`, `subscription-renewal`, `contact-form-notification`, `shipping-notification`):
+   - Click **Create folder** with the template name (e.g., `welcome`)
+   - Click into that folder
+   - Click **Upload** → **Add files**
+   - Select all 3 files from that template folder (`template.html`, `template.txt`, `metadata.json`)
+   - Click **Upload**, then **Close**
+   - Go back to `starter-templates` folder and repeat for each template
+
+**Tip:** This step is tedious via console. Consider using AWS CLI just for this step:
+```bash
+aws s3 cp starter-templates/ s3://my-company-sesmailengine/starter-templates/ --recursive
+```
+
+### Step 4: Deploy CloudFormation Stack
+
+1. Go to **CloudFormation** (search "CloudFormation" in the search bar)
+2. Click **Create stack** → **With new resources (standard)**
+3. Select **Upload a template file**
+4. Click **Choose file** and select `template.yaml` from your extracted `sesmailengine-v1.0.0` folder
+5. Click **Next**
+6. Enter stack details:
+   - **Stack name:** `sesmailengine`
+   - **LambdaCodeS3Bucket:** `my-company-sesmailengine` (your bucket name from Step 1)
+   - **AdminEmail:** `admin@mycompany.com` (your email for alerts)
+   - **DefaultSenderEmail:** `noreply@mycompany.com` (must be verified in SES)
+   - **DefaultSenderName:** `My Company` (or your company name)
+   - Leave other parameters as defaults
+7. Click **Next**
+8. On Configure stack options, leave defaults and click **Next**
+9. On Review page:
+   - Scroll to bottom
+   - Check the box: **I acknowledge that AWS CloudFormation might create IAM resources with custom names**
+   - Click **Submit**
+10. Wait for stack status to change to **CREATE_COMPLETE** (2-3 minutes)
+    - Click the refresh button to update status
+
+### Step 5: Install Starter Templates
+
+1. Go to **Lambda** (search "Lambda" in the search bar)
+2. Find and click on `sesmailengine-TemplateSeeder`
+3. Click the **Test** tab
+4. Click **Test** button (you can use the default test event)
+5. You should see a success response showing installed templates
+
+### Step 6: Verify Deployment
+
+1. Go to **CloudFormation** → click your `sesmailengine` stack
+2. Click the **Outputs** tab
+3. Note down these values for integration:
+   - `EventBusName` - for sending emails
+   - `EventBusArn` - for IAM policies
+   - `TemplateBucketName` - for uploading custom templates
+
+Your SESMailEngine is now deployed and ready to use!
 
 ---
 

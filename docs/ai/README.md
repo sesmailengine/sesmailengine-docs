@@ -1,81 +1,42 @@
 # AI-Assisted Troubleshooting
 
-This folder contains documentation optimized for AI assistants (ChatGPT, Claude, Copilot, etc.) to help you troubleshoot SESMailEngine issues.
+Get help from AI assistants (ChatGPT, Claude, Copilot, etc.) using these docs optimized for LLMs.
 
-## How to Use
+## Quick Start
 
-Point your AI assistant to these files when you need help:
+1. Copy the content from the relevant file below
+2. Paste it into your AI chat
+3. Describe your problem
 
-```
-Please read these SESMailEngine docs and help me troubleshoot:
-- https://github.com/YOUR_ORG/sesmailengine/blob/main/docs/ai/ERROR_INDEX.md
-- https://github.com/YOUR_ORG/sesmailengine/blob/main/docs/ai/SUPPORT_GUIDE.md
-```
-
-Or copy the file contents directly into your AI chat.
+The AI will use our documentation to give you accurate, SESMailEngine-specific answers.
 
 ## Files
 
-| File | Purpose | When to Use |
-|------|---------|-------------|
-| `ERROR_INDEX.md` | Error code catalog with causes and fixes | "I'm getting this error..." |
-| `DIAGNOSTIC_QUERIES.md` | AWS CLI commands to investigate issues | "How do I check if..." |
-| `SUPPORT_GUIDE.md` | Step-by-step troubleshooting guides | "My email isn't being delivered" |
-| `FEATURE_GUIDE.md` | Feature explanations and how-to guides | "How do I..." |
+| File | Use When |
+|------|----------|
+| `ERROR_INDEX.md` | You're getting an error message |
+| `SUPPORT_GUIDE.md` | Emails aren't sending or delivering |
+| `DIAGNOSTIC_QUERIES.md` | You need AWS CLI commands to investigate |
+| `FEATURE_GUIDE.md` | You want to understand how something works |
 
-## Example Prompts
+## Example
 
-### Troubleshooting an Error
 ```
 I'm using SESMailEngine and getting this error:
-"Template 'welcome' not found in bucket"
+"Email suppressed: hard-bounce"
 
-[Paste ERROR_INDEX.md content]
+[Paste ERROR_INDEX.md content here]
 
-What's wrong and how do I fix it?
+What does this mean and how do I fix it?
 ```
 
-### Understanding a Feature
-```
-I want to set up different sender addresses for different email types in SESMailEngine.
+## Tips
 
-[Paste FEATURE_GUIDE.md content]
+- **Include the exact error message** - Copy the full text, not a summary
+- **Mention your stack name** - Replace `{STACK}` in commands with your actual name
+- **All files fit in one chat** - Total ~11K tokens, works with most AI models
 
-How should I configure this?
-```
+## See Also
 
-### Diagnosing Delivery Issues
-```
-My emails aren't being delivered. The tracking table shows status "failed".
-
-[Paste SUPPORT_GUIDE.md content]
-
-Help me diagnose the issue.
-```
-
-## Token Budget
-
-All files are designed to fit in most AI context windows:
-
-| File | ~Tokens |
-|------|---------|
-| ERROR_INDEX.md | ~2K |
-| DIAGNOSTIC_QUERIES.md | ~2.5K |
-| SUPPORT_GUIDE.md | ~3K |
-| FEATURE_GUIDE.md | ~3.5K |
-| **Total** | ~11K |
-
-You can include all four files in a single conversation with most AI models.
-
-## Tips for Best Results
-
-1. **Include the relevant file** - Don't just describe your problem; give the AI the reference docs
-2. **Provide your stack name** - Replace `{STACK}` in commands with your actual stack name
-3. **Share error messages** - Copy the exact error text, not a summary
-4. **Include context** - What were you trying to do when the error occurred?
-
-## Also See
-
-- `docs/TROUBLESHOOTING.md` - Human-readable troubleshooting guide
-- `docs/INTEGRATION.md` - Integration examples and event formats
-- `docs/SETUP.md` - Deployment and configuration
+- `docs/TROUBLESHOOTING.md` - Human-readable troubleshooting
+- `docs/INTEGRATION.md` - Code examples and event formats

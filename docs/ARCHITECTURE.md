@@ -71,7 +71,7 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 │                              EMAIL SENDER LAMBDA                                         │
 │                              {StackName}-EmailSender                                     │
 │                                                                                         │
-│   Memory: 512MB (configurable)    Timeout: 30s    Concurrency: 100                     │
+│   Memory: 512MB (configurable)    Timeout: 30s    Concurrency: 14 (configurable)      │
 │                                                                                         │
 │   ┌─────────────────────────────────────────────────────────────────────────────────┐  │
 │   │  handler.py - Main entry point                                                   │  │
@@ -207,7 +207,7 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 │   }                                                                                     │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                               │
-                                              │ EventSourceMapping (BatchSize: 10)
+                                              │ EventSourceMapping (BatchSize: 1)
                                               ▼
                               ┌───────────────────────────────┐
                               │   EMAIL SENDER LAMBDA         │
@@ -450,6 +450,30 @@ s3://{StackName}-templates-{AccountId}/
 
 *Document generated from actual CloudFormation template and Lambda code. Last updated: December 2024*
 
+
+---
+
+## Lambda Configuration
+
+### Email Sender Lambda
+| Setting | Default | Configurable | Notes |
+|---------|---------|--------------|-------|
+| Memory | 512MB | Yes | CloudFormation parameter |
+| Timeout | 30s | Yes | CloudFormation parameter |
+| Concurrency | 14 | Yes | Matches SES sandbox rate (14/sec). Increase when moving to production SES. |
+
+### Feedback Processor Lambda
+| Setting | Default | Configurable | Notes |
+|---------|---------|--------------|-------|
+| Memory | 256MB | Yes | CloudFormation parameter |
+| Timeout | 15s | Yes | CloudFormation parameter |
+| Concurrency | 100 | No | Fixed - handles SES feedback events |
+
+### SQS Retry Queue → Email Sender
+| Setting | Value | Notes |
+|---------|-------|-------|
+| BatchSize | 1 | **Critical**: Handler only processes `Records[0]`. BatchSize > 1 would cause data loss. |
+| MaxBatchingWindow | 0 | No batching delay - process immediately |
 
 ---
 
