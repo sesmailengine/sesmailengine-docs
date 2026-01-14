@@ -1203,14 +1203,13 @@ SESEmailEngine is designed for high-throughput email sending. Below are performa
 
 | Scenario | Throughput | Success Rate | Notes |
 |----------|------------|--------------|-------|
-| Light load (100 emails) | 50-100 emails/sec | >99% | Single Lambda instance |
-| Standard load (1,000 emails) | 100-200 emails/sec | >99% | Multiple Lambda instances |
-| High load (10,000 emails) | 150-300 emails/sec | >98% | Full Lambda concurrency |
-| Extreme load (50,000 emails) | 150-300 emails/sec | >95% | May hit SES/Lambda limits |
+| Light load (100 emails) | ~14 emails/sec | >99% | Matches SES rate limit |
+| Standard load (1,000 emails) | ~14 emails/sec | >99% | Sustained rate |
+| High load (10,000 emails) | ~14 emails/sec | >98% | Request SES increase for higher |
 
 **Factors affecting throughput:**
-- Lambda concurrency limit (default: 100)
-- SES sending rate (default: 14/sec, can be increased)
+- SES sending rate (default: 14/sec for new production accounts)
+- Lambda concurrency (should match SES rate to avoid burst throttling)
 - DynamoDB write capacity (on-demand scales automatically)
 - Template complexity and size
 
@@ -1234,120 +1233,27 @@ Lambda cold starts can add 500-1500ms to the first request. To minimize cold sta
 
 ### Scaling Recommendations
 
+Lambda concurrency should match your SES sending rate to avoid burst throttling.
+
 | Daily Volume | Lambda Concurrency | SES Rate Limit | Notes |
 |--------------|-------------------|----------------|-------|
-| <10,000 | Default (100) | Default (14/sec) | No changes needed |
-| 10,000-100,000 | 200-500 | Request increase | Contact AWS Support |
-| >100,000 | 500-1000 | Production access | Apply for SES production |
+| <1,200,000 | 14 (default) | 14/sec (default) | No changes needed |
+| 1,200,000 - 4,300,000 | 50 | 50/sec | Request SES increase |
+| >4,300,000 | 100+ | 100+/sec | Contact AWS Support |
 
-### Running Your Own Benchmarks
+**Calculation:** 14 emails/sec × 86,400 seconds/day = ~1.2 million emails/day
 
-Test performance in your environment:
-
-```bash
-# Quick test (100 emails)
-./scripts/run-load-test.sh -c 100 -w 10
-
-# Standard test (1,000 emails)
-./scripts/run-load-test.sh -c 1000 -w 50
-
-# High load test (10,000 emails)
-./scripts/run-load-test.sh -c 10000 -w 100
-
-# Extreme load test (50,000 emails)
-./scripts/run-load-test.sh -c 50000 -w 150
-
-# Full benchmark suite
-./scripts/run-benchmark-suite.sh
-```
-
-### Data Integrity Verification
-
-The load tests include data integrity verification to ensure no emails are lost:
-
-```bash
-# Run all data integrity tests
-pytest tests/load/test_email_throughput.py::TestDataIntegrity -v
-pytest tests/load/test_email_throughput.py::TestSuppressionDataIntegrity -v
-
-# Quick tracking integrity test (1,000 emails)
-pytest tests/load/test_email_throughput.py::TestDataIntegrity::test_data_integrity_1000_emails -v
-
-# Full tracking integrity test (50,000 emails) - takes 10-20 minutes
-pytest tests/load/test_email_throughput.py::TestDataIntegrity::test_data_integrity_50000_emails -v -m slow
-
-# Suppression integrity tests (bounces and complaints)
-pytest tests/load/test_email_throughput.py::TestSuppressionDataIntegrity::test_suppression_integrity_100_bounces -v
-pytest tests/load/test_email_throughput.py::TestSuppressionDataIntegrity::test_mixed_bounce_complaint_integrity -v
-```
-
-**Tracking Table Integrity Tests:**
-1. Send emails to EventBridge
-2. Wait for Lambda processing (up to 5 minutes for 50K)
-3. Verify every email has a tracking record in DynamoDB
-4. Fail if any emails are missing (0% data loss tolerance)
-
-**Suppression Table Integrity Tests:**
-1. Send emails to bounce/complaint simulator addresses
-2. Wait for SES → SNS → Feedback Processor → DynamoDB pipeline
-3. Verify suppression entries are created for bounced/complained addresses
-4. Fail if suppression entries are missing
-
-**Requirements:**
-- Deployed CloudFormation stack
-- `AWS_STACK_NAME` environment variable set
-- Template "welcome" in template bucket
-
-**Test Conditions Disclaimer:**
-- Tests use SES simulator addresses (no real emails sent)
-- Results may vary based on AWS region, account limits, and network conditions
-- Production performance depends on template complexity and recipient validation
-
-### Advanced Load Tests
-
-For comprehensive system validation, run the advanced test scenarios:
-
-```bash
-# Sustained load test (5 minutes at 10 emails/sec)
-pytest tests/load/test_advanced_scenarios.py::TestSustainedLoad -v -m slow
-
-# Cold start impact measurement
-pytest tests/load/test_advanced_scenarios.py::TestColdStartImpact -v
-
-# Concurrent template tests
-pytest tests/load/test_advanced_scenarios.py::TestConcurrentTemplates -v
-
-# SES simulator edge cases (OOTO, suppression list)
-pytest tests/load/test_advanced_scenarios.py::TestSESSimulatorEdgeCases -v
-
-# Retry queue behavior
-pytest tests/load/test_advanced_scenarios.py::TestRetryQueueBehavior -v
-
-# Error recovery tests
-pytest tests/load/test_advanced_scenarios.py::TestErrorRecovery -v
-
-# DynamoDB behavior under load
-pytest tests/load/test_advanced_scenarios.py::TestDynamoDBBehavior -v
-
-# Maximum burst capacity (stress test)
-pytest tests/load/test_advanced_scenarios.py::TestStressConditions -v -m slow
-
-# Run all advanced tests
-pytest tests/load/test_advanced_scenarios.py -v
-```
-
-**Advanced Test Categories:**
-
-| Test Category | Purpose | Duration |
-|---------------|---------|----------|
-| Sustained Load | Detect memory leaks, throttling over time | 5+ minutes |
-| Cold Start Impact | Measure Lambda cold start overhead | 2-3 minutes |
-| Concurrent Templates | Validate template caching, S3 patterns | 1-2 minutes |
-| SES Edge Cases | Test OOTO, suppression list handling | 2-3 minutes |
-| Retry Queue | Verify soft bounce retry infrastructure | 1-2 minutes |
-| Error Recovery | Ensure errors don't affect valid emails | 2-3 minutes |
-| DynamoDB Behavior | Test write throughput, GSI performance | 2-3 minutes |
-| Stress Conditions | Find maximum burst capacity | 5+ minutes |
+**To increase SES rate limit:**
+1. Go to AWS SES Console → Account Dashboard
+2. Click "Request production access" or "Request a sending limit increase"
+3. After approval, update Lambda concurrency to match:
+   ```bash
+   aws cloudformation update-stack \
+     --stack-name sesmailengine \
+     --use-previous-template \
+     --parameters ParameterKey=EmailSenderConcurrency,ParameterValue=50 \
+     --capabilities CAPABILITY_NAMED_IAM
+   ```
 
 ---
 

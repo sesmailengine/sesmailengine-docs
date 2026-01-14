@@ -287,6 +287,73 @@ These can be customized after deployment via CloudFormation:
 | `EmailSenderConcurrency` | `14` | Max concurrent Lambda executions |
 | `FeedbackProcessorMemory` | `256` | Lambda memory in MB (128, 256, 512) |
 | `FeedbackProcessorTimeout` | `15` | Lambda timeout in seconds (5-30) |
+| `RetainDataOnDelete` | `true` | Keep DynamoDB tables and S3 bucket when stack is deleted |
+
+---
+
+## Data Protection (RetainDataOnDelete)
+
+By default, SESMailEngine protects your data when the CloudFormation stack is deleted. This prevents accidental data loss.
+
+### What Gets Protected
+
+When `RetainDataOnDelete=true` (default):
+
+| Resource | Behavior on Stack Delete |
+|----------|-------------------------|
+| **EmailTracking Table** | ✅ Retained - Your email history is preserved |
+| **Suppression Table** | ✅ Retained - Your bounce/complaint list is preserved |
+| **Template Bucket** | ✅ Retained - Your custom templates are preserved |
+| Lambda Functions | ❌ Deleted |
+| EventBridge Bus | ❌ Deleted |
+| CloudWatch Alarms | ❌ Deleted |
+
+### Why This Matters
+
+1. **Email History**: The EmailTracking table contains your complete email audit trail. Losing this means losing compliance records.
+
+2. **Suppression List**: The Suppression table contains email addresses that bounced or complained. Losing this and resending to those addresses can get your SES account suspended.
+
+3. **Custom Templates**: If you've customized templates, they're preserved in the S3 bucket.
+
+### Reinstalling After Uninstall
+
+If you uninstall with `RetainDataOnDelete=true` and want to reinstall:
+
+**Option A: Use a different stack name**
+```bash
+python install.py
+# When prompted for stack name, use a different name like "sesmailengine-v2"
+```
+
+**Option B: Delete retained resources first (DATA LOSS)**
+```bash
+# Delete DynamoDB tables
+aws dynamodb delete-table --table-name sesmailengine-EmailTracking
+aws dynamodb delete-table --table-name sesmailengine-Suppression
+
+# Delete S3 bucket (must empty first)
+aws s3 rb s3://sesmailengine-templates-123456789012 --force
+
+# Now reinstall with same stack name
+python install.py
+```
+
+### Development/Testing Mode
+
+For development environments where data loss is acceptable, set `RetainDataOnDelete=false`:
+
+**During installation**: When prompted "Retain data on stack delete?", answer `n`
+
+**After deployment**: Update the stack parameter:
+```bash
+aws cloudformation update-stack \
+  --stack-name sesmailengine \
+  --use-previous-template \
+  --parameters \
+    ParameterKey=RetainDataOnDelete,ParameterValue=false \
+  --capabilities CAPABILITY_NAMED_IAM
+```
 
 ---
 

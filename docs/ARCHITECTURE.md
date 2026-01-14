@@ -115,7 +115,8 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 │  GSIs:                    │  │      └── ...              │  │  ├── complaint            │
 │  ├── to-email-timestamp   │  │                           │  │  ├── delivery             │
 │  ├── ses-message-id       │  │  Versioning: Enabled      │  │  ├── reject               │
-│  └── date-partition       │  │  Encryption: AES256       │  │  └── open                 │
+│  ├── date-partition       │  │  Encryption: AES256       │  │  └── open                 │
+│  └── original-email-id    │  │                           │  │                           │
 │                           │  │  Public Access: Blocked   │  │                           │
 │  Suppression Table        │  │                           │  │                           │
 │  ├── email (PK)           │  │                           │  │                           │
