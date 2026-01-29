@@ -184,24 +184,24 @@ This guide covers common errors you may encounter when using SESEmailEngine and 
 
 ---
 
-### Installer log file
-
-The installer creates a detailed log file for debugging:
-
-```bash
-cat sesmailengine-install.log
-```
-
-This contains:
-- All AWS API calls made
-- Full error messages and stack traces
-- Timestamps for each operation
-
----
-
 ### Manual cleanup after failed install
 
-If installation fails partway through, clean up before retrying:
+If installation fails partway through, use the installer's uninstall command:
+
+```bash
+# If using default stack name (sesmailengine)
+python install.py --uninstall
+
+# If using a custom stack name
+python install.py --uninstall --stack-name my-custom-stack
+```
+
+The installer automatically:
+- Empties the S3 bucket (including versioned objects)
+- Deletes the CloudFormation stack
+- Handles DELETE_FAILED state from previous attempts
+
+**Manual cleanup (if installer doesn't work):**
 
 ```bash
 # Delete partial CloudFormation stack (if created)
@@ -213,6 +213,45 @@ aws cloudformation wait stack-delete-complete --stack-name sesmailengine
 aws s3 rm s3://my-company-sesmailengine --recursive
 # Then delete the bucket
 aws s3 rb s3://my-company-sesmailengine
+```
+
+---
+
+### Uninstall fails: S3 bucket not empty (DELETE_FAILED)
+
+**Error:** `The bucket you tried to delete is not empty. You must delete all versions in the bucket.`
+
+**When:** CloudFormation cannot delete the S3 bucket because it contains objects.
+
+**Why this happens:** When `RetainDataOnDelete=false`, CloudFormation tries to delete the S3 bucket, but AWS requires buckets to be empty first.
+
+**Fix (recommended):** Run the installer's uninstall command again - it detects DELETE_FAILED state and automatically empties the bucket before retrying:
+
+```bash
+# If using default stack name (sesmailengine)
+python install.py --uninstall
+
+# If using a custom stack name
+python install.py --uninstall --stack-name my-custom-stack
+```
+
+**Fix (manual cleanup):** If the installer doesn't work:
+```bash
+# 1. Empty the bucket (including all versions)
+aws s3 rm s3://sesmailengine-templates-YOUR_ACCOUNT_ID --recursive
+
+# 2. Delete all object versions (if versioning was enabled)
+aws s3api list-object-versions --bucket sesmailengine-templates-YOUR_ACCOUNT_ID \
+  --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json | \
+  jq -c '{Objects: .}' | \
+  xargs -I {} aws s3api delete-objects --bucket sesmailengine-templates-YOUR_ACCOUNT_ID --delete '{}'
+
+# 3. Delete the bucket
+aws s3 rb s3://sesmailengine-templates-YOUR_ACCOUNT_ID
+
+# 4. Retry stack deletion
+aws cloudformation delete-stack --stack-name sesmailengine
+aws cloudformation wait stack-delete-complete --stack-name sesmailengine
 ```
 
 ---

@@ -1,161 +1,101 @@
 # Bounce Rate Protection
 
-SESEmailEngine includes automatic bounce rate monitoring to protect your SES reputation.
+SESMailEngine includes automatic bounce and complaint rate monitoring to protect your SES reputation.
 
 ## Overview
 
-Amazon SES monitors your bounce rate and can suspend your sending privileges if it exceeds acceptable thresholds (typically 5-10%). SESEmailEngine proactively checks your daily bounce rate before sending each email and blocks sending when the threshold is exceeded.
+Amazon SES monitors your bounce and complaint rates and can suspend your sending privileges if they exceed acceptable thresholds. SESMailEngine monitors your SES reputation metrics via CloudWatch alarms and alerts you before AWS takes action.
+
+**Important:** Reputation monitoring is **alarm-only** - emails are NOT blocked based on bounce or complaint rates. This gives you visibility into potential issues while maintaining email delivery.
 
 ## How It Works
 
-1. **Before each email send**, the system checks the current daily bounce rate
-2. **If the rate exceeds the threshold**, the email is rejected with a `bounce_rate_exceeded` error
-3. **Results are cached for 5 minutes** to optimize DynamoDB costs
+1. **CloudWatch monitors** your SES account's `Reputation.BounceRate` and `Reputation.ComplaintRate` metrics
+2. **If thresholds are exceeded** for 2 consecutive hours, an alarm triggers
+3. **Alarm notification** is sent to the AdminEmail SNS topic
+4. **Emails continue to send** - no blocking occurs
+
+## AWS SES Thresholds
+
+### Bounce Rate
+
+| Bounce Rate | AWS Action |
+|-------------|------------|
+| < 5% | Normal operation |
+| 5% | Account placed under review |
+| 10% | Sending may be paused |
+
+SESMailEngine's alarm triggers at **3%** by default as an early warning.
+
+### Complaint Rate
+
+| Complaint Rate | AWS Action |
+|----------------|------------|
+| < 0.1% | Normal operation |
+| 0.1% | Account placed under review |
+| 0.5% | Sending may be paused |
+
+SESMailEngine's alarm triggers at **0.05%** by default as an early warning.
 
 ## Configuration
 
-### Bounce Rate Threshold
+### CloudFormation Parameters
 
-Set via CloudFormation parameter `BounceRateThreshold`:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `BounceRateAlarmThreshold` | 0.03 (3%) | Bounce rate threshold for alarm |
+| `ComplaintRateAlarmThreshold` | 0.0005 (0.05%) | Complaint rate threshold for alarm |
+| `ReputationAlarmPeriod` | 3600 (1 hour) | Evaluation period in seconds |
 
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `BounceRateThreshold` | 5 | 1-10 | Maximum allowed bounce rate percentage |
+### Alarm Evaluation
 
-Example: Setting `BounceRateThreshold=5` means sending stops when bounce rate exceeds 5%.
-
-## Caching Behavior
-
-### Why Caching?
-
-Checking bounce rate requires two DynamoDB queries:
-- Count daily emails sent (EmailTracking table)
-- Count daily bounces (Suppression table)
-
-Without caching, high-volume senders would incur significant DynamoDB costs:
-- 10,000 emails/day × 2 queries = 20,000 queries/day
-
-### Cache Configuration
-
-| Setting | Value | Description |
-|---------|-------|-------------|
-| Cache TTL | 5 minutes | How long results are cached |
-| Cache Scope | Per Lambda instance | Each warm Lambda shares cache |
-
-### Cost Savings
-
-| Scenario | Without Cache | With 5-min Cache | Savings |
-|----------|---------------|------------------|---------|
-| 10,000 emails/day | 20,000 queries | 576 queries | 97% |
-| 100,000 emails/day | 200,000 queries | 576 queries | 99.7% |
-
-### Trade-offs
-
-**Benefit**: Significant cost reduction and lower latency
-
-**Trade-off**: Up to 5 minutes delay in detecting bounce rate spikes
-
-**Risk Assessment**:
-- At 100 emails/minute, ~500 emails could be sent before protection kicks in
-- SES evaluates bounce rates over 24 hours, not minutes
-- 500 emails during a spike won't significantly impact your SES reputation
-- Bounce rates typically change gradually, not in sudden spikes
-
-## Bypass Cache
-
-For critical scenarios, you can bypass the cache:
-
-```python
-from bounce_quota_service import BounceQuotaService
-
-service = BounceQuotaService()
-
-# Normal check (uses cache)
-result = service.check_bounce_rate()
-
-# Force fresh query (bypasses cache)
-result = service.check_bounce_rate(bypass_cache=True)
-
-# Clear cache manually
-service.clear_cache()
-```
-
-## Error Handling
-
-When bounce rate is exceeded:
-
-### EventBridge Events
-- Returns success (200) to consume the event
-- Logs the failure with reason `bounce_rate_exceeded`
-- Email is NOT sent
-- **Tracking record created** with status `failed` and error message
-
-### SQS Retry Events (Soft Bounce Retries)
-- Returns success (200) to consume the message
-- Email is NOT sent
-- **Tracking record created** with status `failed` and error message containing "during retry"
-- Response includes `wasRetry: true` to indicate this was a retry attempt
-
-This ensures **no silent email loss** - every blocked email (whether from EventBridge or SQS retry) gets a tracking record that customers can query.
-
-### Tracking Record
-
-When an email is blocked due to bounce rate, a tracking record is created in DynamoDB:
-
-```json
-{
-  "emailId": "email-xxx",
-  "status": "failed",
-  "errorMessage": "Bounce rate exceeded: 6.2%",
-  "toEmail": "recipient@example.com",
-  "templateName": "welcome",
-  "timestamp": "2024-12-19T10:30:00Z"
-}
-```
-
-For retry attempts blocked by bounce rate:
-
-```json
-{
-  "emailId": "email-yyy",
-  "status": "failed",
-  "errorMessage": "Bounce rate exceeded during retry: 6.2%",
-  "toEmail": "recipient@example.com",
-  "templateName": "welcome",
-  "originalEmailId": "email-xxx",
-  "retryAttempt": 1,
-  "timestamp": "2024-12-19T10:45:00Z"
-}
-```
-
-You can query blocked emails using the `to-email-timestamp-index` GSI.
+Both alarms use 2 consecutive evaluation periods to reduce noise from temporary spikes.
 
 ## Monitoring
 
-Check CloudWatch Logs for bounce rate warnings:
+### CloudWatch Alarms
 
-```
-[WARNING] Bounce rate exceeded: 6.2% (threshold: 5.0%)
-```
+| Alarm | Metric | Default Threshold |
+|-------|--------|-------------------|
+| `{StackName}-SES-BounceRate` | SES Reputation.BounceRate | > 3% for 2 consecutive hours |
+| `{StackName}-SES-ComplaintRate` | SES Reputation.ComplaintRate | > 0.05% for 2 consecutive hours |
 
-Filter pattern for blocked emails:
-```
-"bounce_rate_exceeded"
+Alarm notifications are sent to the `{StackName}-Alarms` SNS topic, which emails the `AdminEmail` address.
+
+### Checking Current Rates
+
+View your current SES reputation metrics in the AWS Console:
+1. Go to **Amazon SES** → **Account dashboard**
+2. Check **Reputation metrics** section
+
+Or via CLI:
+```bash
+aws ses get-send-statistics
 ```
 
 ## Best Practices
 
-1. **Set conservative thresholds**: Start with 3-4% rather than 5%
+1. **Act on alarms promptly**: When you receive an alarm, investigate immediately
 2. **Monitor trends**: Watch for gradual increases before hitting threshold
 3. **Clean your lists**: Regularly remove invalid addresses
 4. **Use double opt-in**: Reduces invalid addresses from the start
-5. **Review DLQ**: Check EventBridge DLQ for blocked emails
+5. **Check SES console**: Compare with SES account-level metrics
+
+## Responding to Alarms
+
+When you receive a bounce rate alarm:
+
+1. **Check recent bounces** in the Suppression table
+2. **Identify the source** - which campaign or application is causing bounces?
+3. **Review email lists** - are you sending to old or unverified addresses?
+4. **Check SES console** - view detailed bounce metrics
+5. **Take action** - pause problematic campaigns, clean lists, or investigate further
 
 ## Troubleshooting
 
-### Emails Being Blocked
+### High Bounce Rate
 
-1. Check current bounce rate:
+1. Check recent bounces in Suppression table:
    ```bash
    aws dynamodb query \
      --table-name ${STACK_NAME}-Suppression \
@@ -164,149 +104,143 @@ Filter pattern for blocked emails:
      --expression-attribute-values '{":type":{"S":"bounce"}}'
    ```
 
-2. Review recent bounces in Suppression table
+2. Review bounce reasons - are they mostly `NoEmail` (bad addresses) or `MailboxFull` (temporary)?
+
 3. Check SES console for account-level bounce rate
-4. Consider temporarily increasing threshold (not recommended long-term)
 
-### Cache Issues
-
-If you suspect stale cache data:
-1. Wait 5 minutes for cache to expire
-2. Or deploy a new Lambda version (cold start = fresh cache)
-3. Or use `bypass_cache=True` for critical checks
+4. Consider pausing campaigns until you clean your email lists
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────┐
-│  Email Request  │────▶│  Bounce Rate     │
-│  (EventBridge)  │     │  Check           │
-└─────────────────┘     └────────┬─────────┘
-                                 │
+│  AWS SES        │────▶│  CloudWatch      │
+│  Reputation     │     │  Metrics         │
+│  Metrics        │     └────────┬─────────┘
+└─────────────────┘              │
                     ┌────────────┴────────────┐
                     │                         │
-              Cache Hit?                 Cache Miss
+              Rate < 3%                  Rate >= 3%
+              (2 hours)                  (2 hours)
                     │                         │
                     ▼                         ▼
             ┌───────────────┐       ┌─────────────────┐
-            │ Return Cached │       │ Query DynamoDB  │
-            │ Result        │       │ - EmailTracking │
-            └───────────────┘       │ - Suppression   │
-                                    └────────┬────────┘
+            │ No Action     │       │ Trigger Alarm   │
+            │               │       │ → SNS → Email   │
+            └───────────────┘       └─────────────────┘
                                              │
                                              ▼
                                     ┌─────────────────┐
-                                    │ Calculate Rate  │
-                                    │ Update Cache    │
-                                    └────────┬────────┘
-                                             │
-                              ┌──────────────┴──────────────┐
-                              │                             │
-                        Rate OK                      Rate Exceeded
-                              │                             │
-                              ▼                             ▼
-                    ┌─────────────────┐           ┌─────────────────┐
-                    │ Proceed with    │           │ Block Email     │
-                    │ Email Send      │           │ Log Warning     │
-                    └─────────────────┘           └─────────────────┘
+                                    │ Admin Reviews   │
+                                    │ Takes Action    │
+                                    └─────────────────┘
 ```
+
+**Note:** Emails continue to send regardless of bounce rate. The alarm is informational only.
 
 ## Soft Bounce Handling
 
-SESEmailEngine handles soft bounces (temporary delivery failures) with a balanced approach that provides quick feedback while protecting against truly problematic addresses.
+SESMailEngine handles soft bounces (temporary delivery failures) with a consecutive bounce approach.
 
-### Soft Bounce Retry Behavior
+### Consecutive Soft Bounce Suppression
 
-When a soft bounce occurs (e.g., mailbox full, temporary rejection):
+When a soft bounce occurs, the system checks if the last N emails to that address ALL soft bounced:
 
-| Event | Action |
-|-------|--------|
-| First soft bounce | Retry once after 15 minutes |
-| Retry also soft bounces | Mark as "failed" (no suppression) |
-| 15+ soft bounces in 30 days | Permanent suppression |
+| Consecutive Soft Bounces | Action |
+|--------------------------|--------|
+| 1-2 | Update status to "soft_bounced", no suppression |
+| 3+ (configurable) | Add to suppression list |
 
-### Why Single Retry?
+**Note:**  SESMailEngine retries soft bounces for up to 12 hours via SES before soft bounce event is published.  
 
-The previous approach (3 retries over 45 minutes) was too aggressive:
-- A single failed email chain could permanently suppress an address
-- Customers lost control over whether to retry
-- 45-minute retry window was often too long for transactional emails
+### Configuration
 
-The new approach provides:
-- **Faster feedback**: 15 minutes vs 45 minutes
-- **Customer control**: "failed" status lets you decide to resend
-- **Cross-campaign protection**: 15 bounces/month threshold catches truly bad addresses
+The consecutive soft bounce threshold is configurable via CloudFormation parameter:
 
-### Understanding "failed" vs "suppressed"
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `ConsecutiveSoftBounceThreshold` | 3 | 2-10 | Consecutive soft bounces before suppression |
 
-| Status | Meaning | Can Resend? |
+### Understanding "soft_bounced" Status
+
+| Status | Meaning | Suppressed? |
 |--------|---------|-------------|
-| `failed` | Retry exhausted, but address NOT suppressed | Yes - your choice |
-| `bounced` | Hard bounce, address permanently suppressed | No - will be blocked |
-| `soft_bounced` | Temporary failure, retry scheduled | Wait for retry result |
-
-### Cross-Campaign Suppression
-
-To protect against truly problematic addresses, the system tracks soft bounces across all campaigns within a 30-day rolling window:
-
-| Soft Bounces (30 days) | Action |
-|------------------------|--------|
-| 1-14 | Normal retry behavior |
-| 15+ | Permanent suppression |
-
-This prevents:
-- Repeatedly sending to addresses that consistently fail
-- Wasting SES quota on problematic addresses
-- Damaging your sender reputation over time
-
-### Checking Soft Bounce History
-
-Query soft bounces for an email address:
-
-```bash
-aws dynamodb query \
-  --table-name ${STACK_NAME}-EmailTracking \
-  --index-name to-email-timestamp-index \
-  --key-condition-expression "toEmail = :email" \
-  --filter-expression "#status = :status" \
-  --expression-attribute-names '{"#status": "status"}' \
-  --expression-attribute-values '{":email":{"S":"user@example.com"},":status":{"S":"soft_bounced"}}'
-```
-
-### Resending Failed Emails
-
-When an email has `failed` status due to retry exhaustion:
-
-1. Check the `errorMessage` field for the failure reason
-2. Decide if resending is appropriate (e.g., wait longer for mailbox full)
-3. Publish a new EventBridge event with the same or new email ID
-4. The system will attempt delivery again
-
-```python
-# Example: Resend a failed email
-events.put_events(
-    Entries=[{
-        'Source': 'my.application',
-        'DetailType': 'Email Request',
-        'EventBusName': 'my-email-engine-EmailBus',
-        'Detail': json.dumps({
-            'to': 'user@example.com',  # Same recipient
-            'templateName': 'welcome',
-            'templateData': {'userName': 'John'},
-            # New emailId for tracking (or omit to auto-generate)
-            'emailId': f'welcome-{user_id}-retry-{datetime.now().isoformat()}'
-        })
-    }]
-)
-```
+| `soft_bounced` | Temporary failure recorded | Only if consecutive threshold reached |
+| `bounced` | Hard bounce, address permanently suppressed | Yes |
 
 ### Soft Bounce Types
 
-| Bounce SubType | Description | Retry? |
-|----------------|-------------|--------|
-| `MailboxFull` | Recipient's mailbox is full | Yes |
-| `MessageTooLarge` | Email too large for recipient | Yes |
-| `ContentRejected` | Spam filter rejection | Yes |
-| `General` | Unspecified temporary failure | Yes |
-| `NoEmail` | Address doesn't exist | No (hard bounce) |
-| `Suppressed` | On SES suppression list | No (hard bounce) |
+| Bounce SubType | Description | Suppression |
+|----------------|-------------|-------------|
+| `MailboxFull` | Recipient's mailbox is full | After 3 consecutive |
+| `MessageTooLarge` | Email too large for recipient | After 3 consecutive |
+| `ContentRejected` | Spam filter rejection | After 3 consecutive |
+| `General` | Unspecified temporary failure | After 3 consecutive |
+| `NoEmail` | Address doesn't exist | Immediate (hard bounce) |
+| `Suppressed` | On SES suppression list | Immediate (hard bounce) |
+| `EmailValidationSuppressed` | AWS Auto Validation blocked | Immediate (hard bounce) |
+
+
+## AWS SES Email Validation Compatibility
+
+SESMailEngine is fully compatible with AWS SES Email Validation (Auto Validation), a feature launched in January 2026 that proactively validates email addresses before sending.
+
+### How It Works Together
+
+When AWS Auto Validation is enabled at the account level:
+
+1. **You send email** through SESMailEngine
+2. **SES accepts the request** and returns a MessageId
+3. **SES Auto Validation checks** the recipient address
+4. **If invalid**, SES generates a bounce notification with `bounceSubType: "EmailValidationSuppressed"`
+5. **SESMailEngine receives** the bounce via SNS
+6. **Feedback Processor** handles it as a hard bounce:
+   - Updates tracking status to "bounced"
+   - **Adds address to suppression list immediately**
+   - Publishes "Email Status Changed" event
+7. **Future sends to this address are blocked** by SESMailEngine's suppression check (no additional validation charges)
+
+### Supported Bounce SubTypes
+
+| SubType | Source | Action |
+|---------|--------|--------|
+| `NoEmail` | Actual bounce | Immediate suppression |
+| `Suppressed` | SES account suppression | Immediate suppression |
+| `EmailValidationSuppressed` | AWS Auto Validation | Immediate suppression |
+
+### Enabling AWS Auto Validation
+
+Enable Auto Validation in the AWS Console:
+
+1. Go to **Amazon SES** → **Account dashboard**
+2. Navigate to **Suppression** section
+3. Enable **Auto Validation**
+4. Choose threshold: **Amazon SES managed** (recommended), **High**, or **Medium**
+
+Or via CLI:
+```bash
+aws sesv2 put-account-suppression-attributes \
+  --suppressed-reasons BOUNCE COMPLAINT \
+  --region us-east-1
+```
+
+### Cost Considerations
+
+| Feature | Cost |
+|---------|------|
+| Auto Validation | $0.01 per 1,000 validations |
+| Suppressed sends | Still count toward daily quota |
+| Suppressed sends | Still charged standard send fee |
+
+**With SESMailEngine:** Invalid addresses are suppressed after the first validation. Future sends to that address are blocked by SESMailEngine's suppression check *before* reaching SES, so you only pay for validation once per bad address.
+
+### Benefits of Using Both
+
+| SESMailEngine | AWS Auto Validation |
+|---------------|---------------------|
+| Reactive (handles bounces after they occur) | Proactive (prevents bounces before they occur) |
+| Suppression from actual bounces | Suppression from predicted invalidity |
+| Template management, tracking, notifications | Address validation only |
+| **One-time validation cost** (suppresses after first check) | Charges per validation attempt |
+
+**Recommendation:** Enable AWS Auto Validation for proactive protection. SESMailEngine handles the bounce notifications automatically, suppresses invalid addresses after the first validation (saving future validation costs), and provides the complete email infrastructure (templates, tracking, status notifications) that Auto Validation doesn't include.

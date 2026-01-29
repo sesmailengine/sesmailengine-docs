@@ -659,76 +659,6 @@ for item in response['Items']:
     print(f"{item['emailId']['S']}: {item['status']['S']}")
 ```
 
-### Tracking Retry Attempts
-
-When a soft bounce occurs, the system automatically retries the email. Each retry creates a NEW tracking record with:
-- A new `emailId` (auto-generated)
-- `originalEmailId` pointing to the first email attempt
-- `retryAttempt` counter (0 for original, 1 for retry)
-
-**Why new records per retry?**
-- Full audit trail - every attempt is recorded
-- Simple INSERT operations with idempotency protection
-- No risk of overwriting data from race conditions
-
-**Query all attempts for a specific email using `original-email-id-index` GSI:**
-
-```python
-import boto3
-
-dynamodb = boto3.client('dynamodb')
-
-# Find all attempts (original + retries) for a specific email
-# Use the originalEmailId from your first send
-response = dynamodb.query(
-    TableName='my-email-engine-EmailTracking',
-    IndexName='original-email-id-index',
-    KeyConditionExpression='originalEmailId = :origId',
-    ExpressionAttributeValues={':origId': {'S': 'email-abc123'}},
-    ScanIndexForward=True,  # Oldest first
-)
-
-for item in response['Items']:
-    email_id = item['emailId']['S']
-    retry = int(item.get('retryAttempt', {}).get('N', '0'))
-    status = item['status']['S']
-    
-    if retry > 0:
-        print(f"  └─ Retry #{retry}: {email_id} → {status}")
-    else:
-        print(f"Original: {email_id} → {status}")
-```
-
-**Example output:**
-```
-Original: email-abc123 → soft_bounced
-  └─ Retry #1: email-def456 → delivered
-```
-
-**Understanding the retry chain:**
-- Original email (`retryAttempt=0`) shows `soft_bounced` status
-- Retry email (`retryAttempt=1`) shows final outcome (`delivered` or `failed`)
-- Both records have the same `originalEmailId` value
-- Query by `originalEmailId` returns ONLY the retry chain for that specific email (not all emails to the recipient)
-
-**Get final outcome for an email:**
-
-```python
-# Query all attempts and get the latest one
-response = dynamodb.query(
-    TableName='my-email-engine-EmailTracking',
-    IndexName='original-email-id-index',
-    KeyConditionExpression='originalEmailId = :origId',
-    ExpressionAttributeValues={':origId': {'S': 'email-abc123'}},
-    ScanIndexForward=False,  # Newest first
-    Limit=1,  # Get only the latest attempt
-)
-
-if response['Items']:
-    final = response['Items'][0]
-    print(f"Final status: {final['status']['S']}")
-```
-
 ### Email Statuses
 
 Understanding email statuses helps you track delivery success and troubleshoot issues.
@@ -738,18 +668,16 @@ Understanding email statuses helps you track delivery success and troubleshoot i
 | `sent` | Email accepted by SES, awaiting delivery confirmation | Wait for delivery/bounce feedback |
 | `delivered` | SES confirmed delivery to recipient's mail server | Success! Email reached inbox |
 | `opened` | Recipient opened the email (tracking pixel loaded) | Engagement confirmed |
-| `soft_bounced` | Temporary failure (mailbox full, etc.) | System will retry automatically (once) |
+| `soft_bounced` | Temporary failure (mailbox full, etc.) | SESMailEngine retried for up to 12 hours 
 | `bounced` | Permanent failure (address doesn't exist) | Remove from your mailing list |
 | `complained` | Recipient marked email as spam | Never email this address again |
-| `failed` | Processing error or retry exhausted | Check `errorMessage` field - you can resend if appropriate |
+| `failed` | Processing error (template, validation, suppressed) | Check `errorMessage` field |
 
 **Understanding "failed" Status:**
 
 The `failed` status indicates the email was not sent, but the recipient is NOT suppressed. Common reasons include:
 - **Template errors**: Template not found or rendering failed
 - **Validation errors**: Invalid email format or missing required fields
-- **Bounce rate exceeded**: Daily bounce rate threshold exceeded (temporary)
-- **Retry exhausted**: Soft bounce retry failed (you can resend later)
 - **Suppressed recipient**: Recipient is on suppression list (check suppression table)
 
 When you see `failed` status, check the `errorMessage` field for details. Unlike `bounced` or `complained`, a `failed` email does NOT automatically suppress the recipient - you retain control over whether to retry.
@@ -761,11 +689,9 @@ When you see `failed` status, check the `errorMessage` field for details. Unlike
 │ sent │────▶│ delivered │────▶│  opened  │
 └──────┘     └───────────┘     └──────────┘
     │
-    │        ┌─────────────┐     ┌─────────┐
-    ├───────▶│ soft_bounced│────▶│ failed  │  (retry exhausted - you can resend)
-    │        └─────────────┘     └─────────┘
-    │              │
-    │              └───────────▶ delivered  (retry succeeded)
+    │        ┌─────────────┐
+    ├───────▶│ soft_bounced│  (AWS SES retries automatically for up to 12 hours)
+    │        └─────────────┘
     │
     │        ┌─────────────┐
     └───────▶│   bounced   │  (permanent - address suppressed)
@@ -778,71 +704,64 @@ When you see `failed` status, check the `errorMessage` field for details. Unlike
 
 Higher priority statuses cannot be overwritten by lower priority ones. This prevents race conditions when SES events arrive out of order (e.g., "open" event arrives before "delivery" event).
 
-### Soft Bounce Retry Behavior
+### Soft Bounce Handling
 
-When a soft bounce occurs (e.g., mailbox full), the system automatically retries once:
+SESMailEngine includes automatic soft bounce retries via AWS SES (up to 12 hours). If delivery ultimately fails, the address is tracked as `soft_bounced`.
 
-| Attempt | Delay | Action |
-|---------|-------|--------|
-| 1st retry | 15 minutes | Retry via SQS |
-| After retry fails | - | Mark as "failed" (customer can resend) |
+**Consecutive Soft Bounce Suppression:**
 
-**Why single retry?** This provides faster feedback to customers while still handling temporary issues. If the retry fails, the email is marked as "failed" (not suppressed), allowing customers to decide whether to resend.
+If an email address receives 3 consecutive soft bounces (configurable), it is permanently suppressed. This protects against truly problematic addresses.
 
-**Cross-Campaign Protection:** If an email address accumulates 15 soft bounces within a 30-day window (across all campaigns), it is permanently suppressed. This protects against truly problematic addresses while avoiding aggressive suppression from a single failed email chain.
+| Consecutive Soft Bounces | Action |
+|--------------------------|--------|
+| 1-2 | Status updated to "soft_bounced", no suppression |
+| 3+ | Address added to suppression list |
 
-**Soft bounce types that trigger retry:**
+**Soft bounce types:**
 - `MailboxFull` - Recipient's mailbox is full
 - `MessageTooLarge` - Email too large for recipient
 - `ContentRejected` - Spam filter rejection
 - `General` - Unspecified temporary failure
 
-**Hard bounces (immediate suppression, no retry):**
+**Hard bounces (immediate suppression):**
 - `NoEmail` - Address doesn't exist
 - `Suppressed` - Already on SES suppression list
+- `EmailValidationSuppressed` - AWS Auto Validation blocked send
 
 ### Email Processing Flow
 
 This diagram shows every path through the Email Sender Lambda and when tracking records are created:
 
 ```
-Event Arrives (EventBridge or SQS)
+Event Arrives (EventBridge → SQS → Lambda)
     │
     ├─► Parse & Validate Event
     │       │
     │       └─► Invalid email / missing fields
-    │               └─► ✅ Track as "failed" → Event consumed
+    │               └─► ✅ Track as "failed" → Message consumed
     │
     ├─► Check Suppression List
     │       │
     │       └─► Recipient is suppressed
-    │               └─► ✅ Track as "failed" → Event consumed
-    │
-    ├─► Check Bounce Rate
-    │       │
-    │       ├─► Exceeded + EventBridge source
-    │       │       └─► ✅ Track as "failed" → Event consumed
-    │       │
-    │       └─► Exceeded + SQS source
-    │               └─► ❌ No tracking → Message stays in queue
+    │               └─► ✅ Track as "failed" → Message consumed
     │
     ├─► Load & Render Template
     │       │
     │       └─► Template not found / render error
-    │               └─► ✅ Track as "failed" → Event consumed
+    │               └─► ✅ Track as "failed" → Message consumed
     │
     ├─► Send via SES
     │       │
     │       ├─► Success
-    │       │       └─► ✅ Track as "sent" → Event consumed
+    │       │       └─► ✅ Track as "sent" → Message consumed
     │       │
     │       ├─► Permanent error (invalid address, etc.)
-    │       │       └─► ✅ Track as "failed" → Event consumed
+    │       │       └─► ✅ Track as "failed" → Message consumed
     │       │
     │       └─► Retryable error (throttling, rate limit)
-    │               └─► ❌ No tracking → EventBridge retries (3x)
+    │               └─► ❌ No tracking → Message returns to queue
     │                       │
-    │                       └─► All retries exhausted
+    │                       └─► After 3 attempts
     │                               └─► ❌ No tracking → DLQ
     │
     └─► AWS Infrastructure Error
@@ -853,20 +772,17 @@ Event Arrives (EventBridge or SQS)
 
 When SES returns a throttling error (rate limit exceeded), the system does NOT create a tracking record. Instead:
 1. Lambda throws an exception
-2. EventBridge retries the event (3 attempts with exponential backoff)
-3. If all retries fail, the event goes to the EventBridge DLQ
+2. SQS returns the message to the queue (visibility timeout)
+3. After 3 failed attempts, the message goes to the EmailQueue DLQ
 
-This means throttled emails that exhaust all retries will have NO tracking record in DynamoDB. To find these emails, check the EventBridge DLQ. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#throttling--toomanyrequestsexception) for details.
+This means throttled emails that exhaust all retries will have NO tracking record in DynamoDB. To find these emails, check the EmailQueue DLQ. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#throttling--toomanyrequestsexception) for details.
 
 **Key Principle: No Silent Email Loss**
 
-| Scenario | Tracked in DynamoDB? | Event Consumed? |
-|----------|---------------------|-----------------|
+| Scenario | Tracked in DynamoDB? | Message Consumed? |
+|----------|---------------------|-------------------|
 | Email sent successfully | ✅ Yes (`sent`) | Yes |
 | Recipient suppressed | ✅ Yes (`failed`) | Yes |
-| Recipient suppressed (SQS retry) | ✅ Yes (`failed`) | Yes |
-| Bounce rate exceeded (EventBridge) | ✅ Yes (`failed`) | Yes |
-| Bounce rate exceeded (SQS retry) | ✅ Yes (`failed`) | Yes |
 | Template error | ✅ Yes (`failed`) | Yes |
 | Validation error | ✅ Yes (`failed`) | Yes |
 | SES permanent error | ✅ Yes (`failed`) | Yes |
@@ -874,7 +790,7 @@ This means throttled emails that exhaust all retries will have NO tracking recor
 | AWS transient error | ❌ No | No - retries |
 | Unknown error | ❌ No | No - goes to DLQ |
 
-Every consumed event creates a tracking record so you can query what happened. Retryable errors don't create records because the event will be processed again.
+Every consumed message creates a tracking record so you can query what happened. Retryable errors don't create records because the message will be processed again.
 
 ---
 
@@ -919,31 +835,23 @@ if response['FailedEntryCount'] > 0:
             print(f"Failed: {entry['ErrorCode']} - {entry['ErrorMessage']}")
 ```
 
-### 4. Don't Send to Suppressed Addresses
+### 4. Subscribe to Status Notifications
 
-The system automatically blocks suppressed emails, but you can check proactively:
-
-```python
-response = dynamodb.get_item(
-    TableName='my-email-engine-Suppression',
-    Key={'email': {'S': email.lower()}},
-)
-
-if 'Item' in response:
-    print(f"Email is suppressed: {response['Item']['reason']['S']}")
-```
-
-### 5. Rate Limit Your Sends
-
-If sending large batches, add delays to avoid overwhelming SES:
+Get real-time delivery feedback by subscribing to "Email Status Changed" events:
 
 ```python
-import time
-
-for batch in batches:
-    events.put_events(Entries=batch)
-    time.sleep(0.1)  # 100ms between batches
+# Create EventBridge rule to receive bounces/complaints
+{
+    "source": ["sesmailengine"],
+    "detail-type": ["Email Status Changed"],
+    "detail": {
+        "status": ["bounced", "complained"],
+        "originalSource": ["my.application"]
+    }
+}
 ```
+
+See [Receiving Status Notifications](#receiving-status-notifications) for full details.
 
 ---
 
@@ -952,15 +860,16 @@ for batch in batches:
 ### Transactional Emails
 
 ```python
-# Order confirmation
+# Purchase confirmation
 client.send_email(
     to=customer_email,
-    template_name='order-confirmation',
+    template_name='purchase-confirmation',
     template_data={
         'customerName': customer.name,
         'orderId': order.id,
-        'items': order.items,
-        'total': order.total,
+        'productName': order.product_name,
+        'price': order.total,
+        'companyName': 'MyStore',
     },
     metadata={'orderId': order.id, 'type': 'transactional'},
 )
@@ -976,7 +885,7 @@ client.send_email(
     template_data={
         'userName': user.name,
         'resetLink': f'https://myapp.com/reset/{token}',
-        'expiresIn': '24 hours',
+        'companyName': 'MyApp',
     },
     sender_email='security@myapp.com',
     sender_name='MyApp Security',
@@ -984,20 +893,24 @@ client.send_email(
 )
 ```
 
-### Marketing Campaign
+### Subscription Renewal Campaign
 
 ```python
-# Newsletter with campaign tracking
+# Renewal reminders with campaign tracking
 for subscriber in subscribers:
     client.send_email(
         to=subscriber.email,
-        template_name='newsletter-december',
+        template_name='subscription-renewal',
         template_data={
-            'firstName': subscriber.first_name,
+            'userName': subscriber.name,
+            'planName': subscriber.plan,
+            'renewalDate': subscriber.renewal_date,
+            'amount': subscriber.amount,
+            'companyName': 'MyApp',
             'unsubscribeLink': f'https://myapp.com/unsubscribe/{subscriber.id}',
         },
         metadata={
-            'campaignId': 'newsletter-dec-2024',
+            'campaignId': 'renewal-reminder-2026',
             'subscriberId': subscriber.id,
             'segment': subscriber.segment,
         },
@@ -1066,6 +979,30 @@ Your App → EventBridge → SESEmailEngine → SES → Recipient
 }
 ```
 
+**For failures (`status: "failed"`):**
+
+When an email fails before reaching SES (e.g., suppressed recipient, template error), a failure notification is published. These events do NOT include `sesMessageId` since the email never reached SES.
+
+```json
+{
+  "status": "failed",
+  "errorType": "suppressed",
+  "errorMessage": "Recipient is on suppression list"
+}
+```
+
+**Error Types:**
+
+| errorType | Description | Action |
+|-----------|-------------|--------|
+| `suppressed` | Recipient is on suppression list (hard bounce, complaint, or consecutive soft bounces) | Do not retry - address is permanently blocked |
+| `template_not_found` | Template does not exist in S3 bucket | Check template name and ensure template is uploaded |
+| `template_render_error` | Template failed to render (missing variables, Jinja2 syntax error) | Check templateData contains all required variables |
+| `validation_error` | Invalid email format or missing required fields | Fix the email request data |
+| `ses_rejected` | SES permanently rejected the email (non-retryable error) | Check SES account status and email content |
+
+**Note:** Unlike `bounced` or `complained` events, `failed` events do NOT automatically suppress the recipient. The `suppressed` error type indicates the recipient was ALREADY suppressed from a previous bounce or complaint.
+
 ### Creating EventBridge Rules
 
 Create rules in your AWS account to subscribe to status notifications:
@@ -1096,6 +1033,29 @@ Create rules in your AWS account to subscribe to status notifications:
   "detail-type": ["Email Status Changed"],
   "detail": {
     "originalSource": ["my.application"]
+  }
+}
+```
+
+**Subscribe to failure notifications only:**
+```json
+{
+  "source": ["sesmailengine"],
+  "detail-type": ["Email Status Changed"],
+  "detail": {
+    "status": ["failed"]
+  }
+}
+```
+
+**Subscribe to failures with specific error types:**
+```json
+{
+  "source": ["sesmailengine"],
+  "detail-type": ["Email Status Changed"],
+  "detail": {
+    "status": ["failed"],
+    "errorType": ["suppressed", "template_not_found"]
   }
 }
 ```
@@ -1161,7 +1121,23 @@ def lambda_handler(event, context):
     to_email = detail['toEmail']
     metadata = detail.get('metadata', {})
     
-    if status == 'bounced':
+    if status == 'failed':
+        error_type = detail.get('errorType')
+        error_message = detail.get('errorMessage')
+        # Note: sesMessageId is NOT present for failed events
+        print(f"Email failed for {to_email}: {error_type} - {error_message}")
+        
+        if error_type == 'suppressed':
+            # Recipient is permanently blocked - update your database
+            pass
+        elif error_type == 'template_not_found':
+            # Template issue - alert your team
+            pass
+        elif error_type == 'template_render_error':
+            # Missing template variables - check your code
+            pass
+    
+    elif status == 'bounced':
         bounce_type = detail.get('bounceType')
         bounce_reason = detail.get('bounceReason')
         print(f"Hard bounce for {to_email}: {bounce_reason}")

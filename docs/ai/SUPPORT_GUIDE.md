@@ -127,7 +127,7 @@ python install.py --uninstall --stack-name sesmailengine --delete-bucket
 
 2. If suppressed, check reason:
    ├─ "hard-bounce" → Address doesn't exist
-   ├─ "soft-bounce-exceeded" → 15+ soft bounces in 30 days
+   ├─ "consecutive-soft-bounces" → 3+ consecutive soft bounces
    └─ "spam-complaint" → User reported spam
 
 3. If not suppressed, query tracking table:
@@ -323,7 +323,7 @@ Note: If replyTo is not set, replies go to the sender address (From).
 
 2. Check the reason:
    - hard-bounce → Address didn't exist. Are you SURE it's valid now?
-   - soft-bounce-exceeded → 15+ soft bounces in 30 days (cross-campaign)
+   - consecutive-soft-bounces → 3+ consecutive soft bounces to this address
    - spam-complaint → User marked as spam. DO NOT remove!
 
 3. If appropriate, remove:
@@ -776,11 +776,11 @@ This is outside SESMailEngine's control - the email left AWS successfully.
    - Retry attempts get new IDs but same `originalEmailId`
    - Use `original-email-id-index` GSI to query all attempts for a specific email (see DIAGNOSTIC_QUERIES.md)
 
-7. **Soft bounce retry timing**:
-   - Single retry after 15 minutes (SQS maximum delay)
-   - If retry fails, email is marked as "failed" (NOT suppressed)
-   - Customer can resend if appropriate
-   - Cross-campaign protection: 15 soft bounces in 30 days → permanent suppression
+7. **Soft bounce handling**:
+   - SESMailEngine includes automatic soft bounce retries via AWS SES (up to 12 hours)
+   - If delivery ultimately fails, the address is tracked as `soft_bounced`
+   - 3 consecutive soft bounces to same address → permanent suppression
+   - Customer can resend to `soft_bounced` addresses if appropriate
 
 8. **CloudWatch Alarms**:
    - All alarms notify the AdminEmail address

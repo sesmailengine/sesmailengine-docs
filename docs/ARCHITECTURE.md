@@ -10,7 +10,7 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                              DISTRIBUTION PACKAGE                                        │
+│                              DISTRIBUTION PACKAGE                                       │
 │                              sesmailengine-v1.0.0.zip                                   │
 │                                                                                         │
 │   ├── lambda/                      # Pre-packaged Lambda functions                      │
@@ -21,13 +21,14 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 │   ├── template.yaml                # CloudFormation template                            │
 │   ├── install.py                   # Cross-platform Python installer                    │
 │   ├── requirements.txt             # boto3 dependency                                   │
+│   ├── README.md                    # Quick start guide                                  │
 │   └── docs/                        # Documentation                                      │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                               │
                                               │ python install.py
                                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                              CUSTOMER'S AWS ACCOUNT                                      │
+│                              CUSTOMER'S AWS ACCOUNT                                     │
 │                                                                                         │
 │   1. Creates S3 bucket for Lambda code and templates                                    │
 │   2. Uploads Lambda ZIPs and starter templates to S3                                    │
@@ -42,57 +43,72 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    CUSTOMER APPLICATION                                  │
+│                                    CUSTOMER APPLICATION                                 │
 │                                                                                         │
-│   aws events put-events --event-bus-name {StackName}-EmailBus                          │
+│   aws events put-events --event-bus-name {StackName}-EmailBus                           │
 │   --detail-type "Email Request"                                                         │
-│   --detail '{"to":"...", "templateName":"...", "templateData":{...}}'                  │
+│   --detail '{"to":"...", "templateName":"...", "templateData":{...}}'                   │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                               │
                                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    AWS EVENTBRIDGE                                       │
+│                                    AWS EVENTBRIDGE                                      │
 │                                                                                         │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐  │
-│   │  Custom Event Bus: {StackName}-EmailBus                                          │  │
-│   │  Resource Policy: Allows account principals to PutEvents                         │  │
-│   └─────────────────────────────────────────────────────────────────────────────────┘  │
+│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│   │  Custom Event Bus: {StackName}-EmailBus                                         │   │
+│   │  Resource Policy: Allows account principals to PutEvents                        │   │
+│   └─────────────────────────────────────────────────────────────────────────────────┘   │
 │                                              │                                          │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐  │
-│   │  Event Rule: {StackName}-EmailEventRule                                          │  │
-│   │  Pattern: detail-type = "Email Request"                                          │  │
-│   │  Retry Policy: 3 attempts, 1 hour max age                                        │  │
-│   │  DLQ: {StackName}-EventBridgeDLQ                                                 │  │
-│   └─────────────────────────────────────────────────────────────────────────────────┘  │
+│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│   │  Event Rule: {StackName}-EmailEventRule                                         │   │
+│   │  Pattern: detail-type = "Email Request"                                         │   │
+│   │  Target: SQS Queue (EmailQueue)                                                 │   │
+│   └─────────────────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                               │
                                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                              EMAIL SENDER LAMBDA                                         │
-│                              {StackName}-EmailSender                                     │
+│                                    AWS SQS                                              │
 │                                                                                         │
-│   Memory: 512MB (configurable)    Timeout: 30s    Concurrency: 14 (configurable)      │
+│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│   │  Queue: {StackName}-EmailQueue                                                  │   │
+│   │  ├── Visibility Timeout: 600s (10 minutes)                                      │   │
+│   │  ├── Message Retention: 14 days                                                 │   │
+│   │  ├── Long Polling: 20s                                                          │   │
+│   │  └── DLQ: {StackName}-EmailQueueDLQ (after 3 attempts)                          │   │
+│   └─────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                         │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐  │
-│   │  handler.py - Main entry point                                                   │  │
-│   │                                                                                  │  │
-│   │  Step 1: Parse event (EventBridge or SQS retry)                                 │  │
-│   │  Step 2: Check suppression list (DynamoDB)                                      │  │
-│   │  Step 3: Check bounce rate quota (DynamoDB)                                     │  │
-│   │  Step 4: Load and render template (S3 + Jinja2)                                 │  │
-│   │  Step 5: Resolve sender email (override → template → default)                   │  │
-│   │  Step 6: Send email via SES                                                     │  │
-│   │  Step 7: Track in DynamoDB                                                      │  │
-│   └─────────────────────────────────────────────────────────────────────────────────┘  │
+│   Event Source Mapping:                                                                 |  │   |                                                                                     │
+│   └── MaximumConcurrency: 5 (configurable via EmailSenderConcurrency parameter)         │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+                                              │
+                                              ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              EMAIL SENDER LAMBDA                                        │
+│                              {StackName}-EmailSender                                    │
+│                                                                                         │
+│   Memory: 512MB (configurable)    Timeout: 30s                                          │
+│   Concurrency: Controlled by SQS MaximumConcurrency (default: 5)                        │
+│                                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│   │  handler.py - Main entry point                                                  │   │
+│   │                                                                                 │   │
+│   │  Step 1: Parse event (SQS message containing EventBridge event)                 │   │
+│   │  Step 2: Check for duplicate email ID (idempotency)                             │   │
+│   │  Step 3: Check suppression list (DynamoDB)                                      │   │
+│   │  Step 4: Load and render template (S3 + Jinja2)                                 │   │
+│   │  Step 5: Resolve sender email (override → template → default)                   │   │
+│   │  Step 6: Send email via SES                                                     │   │
+│   │  Step 7: Track in DynamoDB                                                      │   │
+│   └─────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                         │
 │   Services:                                                                             │
-│   ├── suppression_service.py  - Check if email is suppressed                           │
-│   ├── bounce_quota_service.py - Calculate daily bounce rate                            │
-│   ├── template_service.py     - Load templates from S3, render with Jinja2             │
-│   ├── email_service.py        - Send via SES with configuration set                    │
-│   ├── tracking_service.py     - Write tracking records to DynamoDB                     │
-│   ├── error_handler.py        - Retry logic and error categorization                   │
-│   └── utils.py                - Email validation, ID generation, env vars              │
+│   ├── suppression_service.py  - Check if email is suppressed                            │
+│   ├── template_service.py     - Load templates from S3, render with Jinja2              │
+│   ├── email_service.py        - Send via SES with configuration set                     │
+│   ├── tracking_service.py     - Write tracking records to DynamoDB                      │
+│   ├── error_handler.py        - Error categorization                                    │
+│   └── utils.py                - Email validation, ID generation, env vars               │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                               │
                     ┌─────────────────────────┼─────────────────────────┐
@@ -108,19 +124,16 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
 │  ├── sesMessageId         │  │  Structure:               │  │  ├── TLS Required         │
 │  ├── timestamp            │  │  templates/               │  │  ├── Reputation Metrics   │
 │  ├── datePartition        │  │  ├── welcome/             │  │  └── Event Destinations   │
-│  ├── retryAttempt         │  │  │   ├── template.html    │  │      └── SNS Topic        │
-│  ├── originalEmailId      │  │  │   ├── template.txt     │  │                           │
-│  └── ttl                  │  │  │   └── metadata.json    │  │  Events Published:        │
-│                           │  │  └── password-reset/      │  │  ├── bounce               │
-│  GSIs:                    │  │      └── ...              │  │  ├── complaint            │
-│  ├── to-email-timestamp   │  │                           │  │  ├── delivery             │
-│  ├── ses-message-id       │  │  Versioning: Enabled      │  │  ├── reject               │
-│  ├── date-partition       │  │  Encryption: AES256       │  │  └── open                 │
-│  └── original-email-id    │  │                           │  │                           │
-│                           │  │  Public Access: Blocked   │  │                           │
-│  Suppression Table        │  │                           │  │                           │
+│  └── ttl                  │  │  │   ├── template.html    │  │      └── SNS Topic        │
+│                           │  │  │   ├── template.txt     │  │                           │
+│  GSIs:                    │  │  │   └── metadata.json    │  │  Events Published:        │
+│  ├── to-email-timestamp   │  │  └── password-reset/      │  │  ├── bounce               │
+│  ├── ses-message-id       │  │      └── ...              │  │  ├── complaint            │
+│  └── date-partition       │  │                           │  │  ├── delivery             │
+│                           │  │  Versioning: Enabled      │  │  ├── reject               │
+│  Suppression Table        │  │  Encryption: AES256       │  │  └── open                 │
 │  ├── email (PK)           │  │                           │  │                           │
-│  ├── suppressionType      │  │                           │  │                           │
+│  ├── suppressionType      │  │  Public Access: Blocked   │  │                           │
 │  ├── reason               │  │                           │  │                           │
 │  └── addedToSuppressionDt │  │                           │  │                           │
 │                           │  │                           │  │                           │
@@ -130,7 +143,7 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
                                                                           │ SES Events
                                                                           ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    AWS SNS                                               │
+│                                    AWS SNS                                              │
 │                                                                                         │
 │   Topic: {StackName}-SESFeedback                                                        │
 │   Policy: Allows ses.amazonaws.com to Publish                                           │
@@ -141,78 +154,49 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
                                               │
                                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                           FEEDBACK PROCESSOR LAMBDA                                      │
-│                           {StackName}-FeedbackProcessor                                  │
+│                           FEEDBACK PROCESSOR LAMBDA                                     │
+│                           {StackName}-FeedbackProcessor                                 │
 │                                                                                         │
-│   Memory: 256MB (configurable)    Timeout: 15s    Concurrency: 100                     │
+│   Memory: 256MB (configurable)    Timeout: 15s    Concurrency: 100                      │
 │                                                                                         │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐  │
-│   │  handler.py - Main entry point                                                   │  │
-│   │                                                                                  │  │
-│   │  1. Parse SNS notification                                                       │  │
-│   │  2. Extract notification type (bounce/complaint/delivery/open)                   │  │
-│   │  3. Route to appropriate processor                                               │  │
-│   │  4. Publish "Email Status Changed" event to EventBridge                         │  │
-│   └─────────────────────────────────────────────────────────────────────────────────┘  │
+│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│   │  handler.py - Main entry point                                                  │   │
+│   │                                                                                 │   │
+│   │  1. Parse SNS notification                                                      │   │
+│   │  2. Extract notification type (bounce/complaint/delivery/open)                  │   │
+│   │  3. Route to appropriate processor                                              │   │
+│   │  4. Publish "Email Status Changed" event to EventBridge                         │   │
+│   └─────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                         │
 │   Processors:                                                                           │
-│   ├── bounce_processor.py       - Hard bounce → suppress, Soft bounce → retry/suppress │
-│   ├── complaint_processor.py    - Add to suppression list                              │
-│   ├── tracking_updater.py       - Update status (delivered, opened, bounced, etc.)     │
-│   ├── suppression_updater.py    - Add entries to suppression table                     │
-│   ├── retry_scheduler.py        - Schedule soft bounce retries via SQS                 │
-│   ├── notification_publisher.py - Publish status changes to EventBridge                │
-│   └── utils.py                  - SNS parsing, bounce type detection, status priority  │
+│   ├── bounce_processor.py       - Hard bounce → suppress, Soft bounce → check consec.   │
+│   ├── complaint_processor.py    - Add to suppression list                               │
+│   ├── tracking_updater.py       - Update status (delivered, opened, bounced, etc.)      │
+│   ├── suppression_updater.py    - Add entries to suppression table                      │
+│   ├── notification_publisher.py - Publish status changes to EventBridge                 │
+│   └── utils.py                  - SNS parsing, bounce type detection, status priority   │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                               │
-                    ┌─────────────────────────┼─────────────────────────┐
-                    │                         │                         │
-                    │ Soft Bounce Retry       │ Status Notifications    │
-                    ▼                         ▼                         │
-┌───────────────────────────────┐  ┌───────────────────────────────┐   │
-│          AWS SQS              │  │       AWS EVENTBRIDGE         │   │
-│                               │  │                               │   │
-│  Retry Queue:                 │  │  "Email Status Changed"       │   │
-│  {StackName}-EmailRetryQueue  │  │  events published to          │   │
-│                               │  │  {StackName}-EmailBus         │   │
-│  ├── Visibility Timeout: 45s  │  │                               │   │
-│  ├── Message Retention: 14d   │  │  Consumer services create     │   │
-│  ├── Long Polling: 20s        │  │  rules to subscribe to        │   │
-│  └── DLQ: EmailRetryDLQ       │  │  status updates               │   │
-└───────────────────────────────┘  └───────────────────────────────┘   │
-          │                                     │                       │
-          │                                     ▼                       │
-          │                        ┌───────────────────────────────┐   │
-          │                        │   CUSTOMER SERVICES           │   │
-          │                        │                               │   │
-          │                        │   EventBridge rules filter    │   │
-          │                        │   by status, originalSource   │   │
-          │                        └───────────────────────────────┘   │
-          │                                                            │
-          ▼                                                            │
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    AWS SQS                                               │
-│                                                                                         │
-│   Retry Queue: {StackName}-EmailRetryQueue                                              │
-│   ├── Visibility Timeout: 45s                                                           │
-│   ├── Message Retention: 14 days                                                        │
-│   ├── Long Polling: 20s                                                                 │
-│   ├── Delay: Set per-message (max 900s = 15 min)                                       │
-│   └── DLQ: {StackName}-EmailRetryDLQ (after 3 receive attempts)                        │
-│                                                                                         │
-│   Message Format:                                                                       │
-│   {                                                                                     │
-│     "originalEmailData": { "to", "templateName", "templateData", "originalEmailId" },  │
-│     "retryAttempt": 1,                                                                  │
-│     "bounceHistory": [{ "timestamp", "reason" }]                                       │
-│   }                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-                                              │
-                                              │ EventSourceMapping (BatchSize: 1)
+                                              │ Status Notifications
                                               ▼
                               ┌───────────────────────────────┐
-                              │   EMAIL SENDER LAMBDA         │
-                              │   (processes retry messages)  │
+                              │       AWS EVENTBRIDGE         │
+                              │                               │
+                              │  "Email Status Changed"       │
+                              │  events published to          │
+                              │  {StackName}-EmailBus         │
+                              │                               │
+                              │  Consumer services create     │
+                              │  rules to subscribe to        │
+                              │  status updates               │
+                              └───────────────────────────────┘
+                                              │
+                                              ▼
+                              ┌───────────────────────────────┐
+                              │   CUSTOMER SERVICES           │
+                              │                               │
+                              │   EventBridge rules filter    │
+                              │   by status, originalSource   │
                               └───────────────────────────────┘
 ```
 
@@ -226,23 +210,24 @@ SESMailEngine is distributed as a ZIP package that customers deploy to their own
        --detail-type "Email Request"
        --detail '{"to":"user@example.com","templateName":"welcome","templateData":{"userName":"John"}}'
 
-2. EventBridge rule matches "Email Request" and invokes Email Sender Lambda
+2. EventBridge rule matches "Email Request" and sends to SQS EmailQueue
 
-3. Email Sender Lambda (handler.py):
-   a. parse_event() - Extract email data from EventBridge event
+3. SQS triggers Email Sender Lambda (MaximumConcurrency controls throughput)
+
+4. Email Sender Lambda (handler.py):
+   a. parse_event() - Extract email data from SQS-wrapped EventBridge event
    b. suppression_service.check_suppression() - Query Suppression table
-   c. bounce_quota_service.check_bounce_rate() - Calculate daily bounce rate
-   d. template_service.get_template() - Load from S3 (with 5-min cache)
-   e. template_service.render_template() - Render with Jinja2
-   f. email_service.resolve_sender() - Priority: senderOverride → template → default
-   g. email_service.send_email() - Call SES SendEmail API
-   h. tracking_service.track_email_sent() - Write to EmailTracking table
+   c. template_service.get_template() - Load from S3 (with 5-min cache)
+   d. template_service.render_template() - Render with Jinja2
+   e. email_service.resolve_sender() - Priority: senderOverride → template → default
+   f. email_service.send_email() - Call SES SendEmail API
+   g. tracking_service.track_email_sent() - Write to EmailTracking table
 
-4. SES sends email and publishes events to SNS topic
+5. SES sends email and publishes events to SNS topic
 
-5. SNS triggers Feedback Processor Lambda
+6. SNS triggers Feedback Processor Lambda
 
-6. Feedback Processor Lambda (handler.py):
+7. Feedback Processor Lambda (handler.py):
    a. parse_sns_message() - Extract SES notification
    b. Route to processor based on notification type:
       - delivery → tracking_updater.update_delivery()
@@ -283,20 +268,14 @@ SES → SNS → Feedback Processor
          │   ├── tracking_updater.update_soft_bounce()
          │   │   └── Update status to "soft_bounced" in EmailTracking
          │   │
-         │   ├── _count_soft_bounces() - Query EmailTracking by toEmail (30-day window)
+         │   ├── _check_consecutive_soft_bounces() - Query last N emails to this address
          │   │
-         │   └── If retryAttempt == 0 (first attempt):
-         │       └── retry_scheduler.schedule_retry()
-         │           └── Send to SQS with 15-min delay (single retry)
+         │   └── If last N emails ALL have status "soft_bounced":
+         │       └── suppression_updater.add_consecutive_soft_bounces()
+         │           └── Add to Suppression with reason="consecutive-soft-bounces"
          │
-         │   └── If retryAttempt >= 1 (retry already attempted):
-         │       └── tracking_updater.update_retry_failed()
-         │           └── Update status to "failed" (customer can resend)
-         │           └── NO suppression - customer retains control
-         │
-         │   └── If 30-day bounce count >= 15 (cross-campaign protection):
-         │       └── suppression_updater.add_soft_bounce_exceeded()
-         │           └── Add to Suppression with reason="soft-bounce-exceeded"
+         │   Note: N is configurable via ConsecutiveSoftBounceThreshold parameter (default: 3)
+         │   Note: NO retry scheduling - AWS SES handles retries internally
 ```
 
 ---
@@ -305,8 +284,8 @@ SES → SNS → Feedback Processor
 
 | DLQ Name | Source | Trigger Condition |
 |----------|--------|-------------------|
-| `{StackName}-EventBridgeDLQ` | EventBridge Rule | Email Sender Lambda fails after 3 retries |
-| `{StackName}-EmailRetryDLQ` | EmailRetryQueue | Retry message fails after 3 receive attempts |
+| `{StackName}-EventBridgeDLQ` | EventBridge Rule | EventBridge fails to deliver to SQS |
+| `{StackName}-EmailQueueDLQ` | EmailQueue | Email message fails after 3 receive attempts |
 | `{StackName}-FeedbackProcessorDLQ` | SNS Subscription | Feedback Processor Lambda fails |
 
 ---
@@ -315,13 +294,14 @@ SES → SNS → Feedback Processor
 
 | Alarm Name | Metric | Threshold | Action |
 |------------|--------|-----------|--------|
-| `{StackName}-EventBridgeDLQ-Depth` | ApproximateNumberOfMessagesVisible | > 0 | SNS → AdminEmail |
-| `{StackName}-RetryDLQ-Depth` | ApproximateNumberOfMessagesVisible | > 0 | SNS → AdminEmail |
+| `{StackName}-EmailQueueDLQ-Depth` | ApproximateNumberOfMessagesVisible | > 0 | SNS → AdminEmail |
 | `{StackName}-FeedbackDLQ-Depth` | ApproximateNumberOfMessagesVisible | > 0 | SNS → AdminEmail |
 | `{StackName}-EmailSender-Errors` | Lambda Errors | > 50 for 2 consecutive 5-min periods | SNS → AdminEmail |
 | `{StackName}-FeedbackProcessor-Errors` | Lambda Errors | > 50 for 2 consecutive 5-min periods | SNS → AdminEmail |
-| `{StackName}-SES-BounceRate` | Reputation.BounceRate | > 3% | SNS → AdminEmail |
-| `{StackName}-SES-ComplaintRate` | Reputation.ComplaintRate | > 0.05% | SNS → AdminEmail |
+| `{StackName}-SES-BounceRate` | SES Reputation.BounceRate | > 3% for 2 consecutive 1-hour periods | SNS → AdminEmail |
+| `{StackName}-SES-ComplaintRate` | SES Reputation.ComplaintRate | > 0.05% for 2 consecutive 1-hour periods | SNS → AdminEmail |
+
+**SES Reputation Alarms:** These alarms monitor your SES account's reputation metrics directly from AWS SES. The bounce rate alarm triggers at 3% (early warning before AWS's 5% review threshold). The complaint rate alarm triggers at 0.05% (early warning before AWS's 0.1% review threshold). Both use 2 consecutive 1-hour evaluation periods to reduce noise.See [BOUNCE_RATE_PROTECTION.md](BOUNCE_RATE_PROTECTION.md) for details.
 
 **Lambda Error Alarm Design:** The threshold (>50 errors for 2 consecutive periods) is designed to ignore temporary burst throttling while catching sustained problems. A marketing campaign burst won't trigger false alarms, but real issues lasting 10+ minutes will alert you.
 
@@ -337,14 +317,13 @@ Alarm notifications are sent to SNS topic `{StackName}-Alarms`, which has an ema
 - **DynamoDB Suppression**: GetItem, Query (read-only)
 - **S3 Template Bucket**: GetObject, ListBucket (prefix: templates/*)
 - **SES**: SendEmail, SendRawEmail (identity/* and configuration-set)
-- **SQS Retry Queue**: ReceiveMessage, DeleteMessage, GetQueueAttributes
-- **SQS EventBridge DLQ**: SendMessage
+- **SQS EmailQueue**: ReceiveMessage, DeleteMessage, GetQueueAttributes
 
 ### Feedback Processor Lambda Role
 - **CloudWatch Logs**: CreateLogGroup, CreateLogStream, PutLogEvents
 - **DynamoDB EmailTracking**: UpdateItem, Query (+ GSI indexes)
 - **DynamoDB Suppression**: PutItem, UpdateItem, GetItem, Query
-- **SQS Retry Queue**: SendMessage
+- **EventBridge**: PutEvents (for status notifications)
 
 ---
 
@@ -356,11 +335,9 @@ Alarm notifications are sent to SNS topic `{StackName}-Alarms`, which has an ema
 | `TRACKING_TABLE` | EmailTrackingTable | DynamoDB table name |
 | `SUPPRESSION_TABLE` | SuppressionTable | DynamoDB table name |
 | `TEMPLATE_BUCKET` | TemplateBucket | S3 bucket name |
-| `RETRY_QUEUE_URL` | EmailRetryQueue | SQS queue URL |
 | `SES_CONFIGURATION_SET` | SESConfigurationSet | SES config set name |
 | `DEFAULT_SENDER_EMAIL` | Parameter | Fallback sender email |
 | `DEFAULT_SENDER_NAME` | Parameter | Fallback sender name |
-| `BOUNCE_RATE_THRESHOLD` | Parameter | Daily bounce rate limit (%) |
 | `DATA_RETENTION_DAYS` | Parameter | TTL for tracking records |
 | `ENVIRONMENT` | Parameter | dev/staging/prod |
 | `LOG_LEVEL` | Hardcoded | INFO |
@@ -370,7 +347,7 @@ Alarm notifications are sent to SNS topic `{StackName}-Alarms`, which has an ema
 |----------|--------|-------------|
 | `TRACKING_TABLE` | EmailTrackingTable | DynamoDB table name |
 | `SUPPRESSION_TABLE` | SuppressionTable | DynamoDB table name |
-| `RETRY_QUEUE_URL` | EmailRetryQueue | SQS queue URL |
+| `CONSECUTIVE_SOFT_BOUNCE_THRESHOLD` | Parameter | Consecutive soft bounces before suppression (default: 3) |
 | `ENVIRONMENT` | Parameter | dev/staging/prod |
 | `LOG_LEVEL` | Hardcoded | INFO |
 
@@ -380,26 +357,26 @@ Alarm notifications are sent to SNS topic `{StackName}-Alarms`, which has an ema
 
 ```
                     ┌─────────────────────────────────────────────────────────┐
-                    │                    EMAIL LIFECYCLE                       │
+                    │                    EMAIL LIFECYCLE                      │
                     └─────────────────────────────────────────────────────────┘
 
     ┌─────────┐
     │  sent   │ ─────────────────────────────────────────────────────────────┐
-    └────┬────┘                                                               │
-         │                                                                    │
+    └────┬────┘                                                              │
+         │                                                                   │
          ├──────────────────┬──────────────────┬──────────────────┐          │
          ▼                  ▼                  ▼                  ▼          │
-    ┌─────────┐       ┌───────────┐      ┌──────────┐      ┌──────────┐     │
-    │delivered│       │soft_bounced│      │ bounced  │      │complained│     │
-    └────┬────┘       └───────────┘      └──────────┘      └──────────┘     │
-         │                                                                    │
-         ▼                                                                    │
-    ┌─────────┐                                                               │
-    │ opened  │ ◄─────────────────────────────────────────────────────────────┘
+    ┌─────────┐       ┌───────────┐      ┌──────────┐      ┌──────────┐      │
+    │delivered│       │soft_bounce│      │ bounced  │      │complained│      │
+    └────┬────┘       └───────────┘      └──────────┘      └──────────┘      │
+         │                                                                   │
+         ▼                                                                   │
+    ┌─────────┐                                                              │
+    │ opened  │ ◄────────────────────────────────────────────────────────────┘
     └─────────┘
 
     ┌─────────┐
-    │ failed  │  (suppressed, bounce rate exceeded, template error, validation error)
+    │ failed  │  (suppressed, template error, validation error)
     └─────────┘
 
 Status Priority (higher number = higher priority, prevents out-of-order overwrites):
@@ -449,7 +426,7 @@ s3://{StackName}-templates-{AccountId}/
 
 ---
 
-*Document generated from actual CloudFormation template and Lambda code. Last updated: December 2024*
+*Document generated from actual CloudFormation template and Lambda code. Last updated: January 2026*
 
 
 ---
@@ -461,7 +438,7 @@ s3://{StackName}-templates-{AccountId}/
 |---------|---------|--------------|-------|
 | Memory | 512MB | Yes | CloudFormation parameter |
 | Timeout | 30s | Yes | CloudFormation parameter |
-| Concurrency | 14 | Yes | Matches SES sandbox rate (14/sec). Increase when moving to production SES. |
+| Concurrency | Controlled by SQS | Yes | Via EmailSenderConcurrency parameter (MaximumConcurrency) |
 
 ### Feedback Processor Lambda
 | Setting | Default | Configurable | Notes |
@@ -470,11 +447,12 @@ s3://{StackName}-templates-{AccountId}/
 | Timeout | 15s | Yes | CloudFormation parameter |
 | Concurrency | 100 | No | Fixed - handles SES feedback events |
 
-### SQS Retry Queue → Email Sender
+### SQS EmailQueue → Email Sender
 | Setting | Value | Notes |
 |---------|-------|-------|
 | BatchSize | 1 | **Critical**: Handler only processes `Records[0]`. BatchSize > 1 would cause data loss. |
 | MaxBatchingWindow | 0 | No batching delay - process immediately |
+| MaximumConcurrency | 5 (default) | Controls Lambda concurrency via SQS event source mapping |
 
 ---
 
@@ -513,7 +491,7 @@ Most services fall within AWS Free Tier for typical usage:
 | 100,000 emails | $3.80 | $0 | $0 | $0.10 | **~$3.90** |
 
 **Free Tier Allowances (monthly):**
-- SES: 62,000 emails when sent from Lambda/EC2
+- SES: 3000 emails when sent from Lambda/EC2
 - Lambda: 1M requests + 400,000 GB-seconds
 - DynamoDB: 25 GB storage + 25 WCU/RCU
 - S3: 5 GB storage + 20,000 GET requests

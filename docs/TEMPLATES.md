@@ -220,21 +220,21 @@ All templates feature:
 
 ### Installing Starter Templates
 
-After deploying SESMailEngine, install starter templates using the Template Seeder Lambda.
+**Automatic Installation:** The `install.py` installer automatically installs all 8 starter templates as the final step (step 8). You don't need to do anything manually.
 
-**Option 1: AWS CLI (Recommended)**
+**Manual Installation (if needed):** If you need to reinstall templates later (e.g., after customizing and wanting to reset), you can invoke the Template Seeder Lambda:
 
-Copy the command from CloudFormation outputs:
+**Option 1: AWS CLI**
 
 ```bash
-# Get the install command
+# Get the install command from CloudFormation outputs
 aws cloudformation describe-stacks \
-  --stack-name my-email-engine \
+  --stack-name sesmailengine \
   --query 'Stacks[0].Outputs[?OutputKey==`InstallTemplatesCommand`].OutputValue' \
   --output text
 
 # Run the command (example output)
-aws lambda invoke --function-name my-email-engine-TemplateSeeder /dev/stdout
+aws lambda invoke --function-name sesmailengine-TemplateSeeder --output text /dev/stdout
 ```
 
 **Option 2: AWS Console**

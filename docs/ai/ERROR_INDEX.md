@@ -105,11 +105,11 @@ Each error entry contains:
 - **Doc**: TROUBLESHOOTING.md#email-not-sent-recipient-is-suppressed
 
 ### SUPP002
-- **Pattern**: `Email not sent: recipient is suppressed \(soft-bounce-exceeded\)`
+- **Pattern**: `Email not sent: recipient is suppressed \(consecutive-soft-bounces\)`
 - **Severity**: permanent
 - **Tracked**: yes (status: failed)
 - **Category**: suppression
-- **Cause**: Recipient had 15+ soft bounces in 30 days (cross-campaign protection)
+- **Cause**: Recipient had 3+ consecutive soft bounces
 - **Doc**: TROUBLESHOOTING.md#email-not-sent-recipient-is-suppressed
 
 ### SUPP003
@@ -381,6 +381,55 @@ Each error entry contains:
 
 **Status Priority (highest to lowest):**
 opened > delivered > bounced > complained > soft_bounced > failed > sent
+
+---
+
+## Installer Errors (INST)
+
+### INST001
+- **Pattern**: `The bucket you tried to delete is not empty`
+- **Severity**: permanent
+- **Tracked**: no (installer error)
+- **Category**: installer
+- **Cause**: CloudFormation cannot delete non-empty S3 bucket during uninstall
+- **Fix**: Empty bucket manually, then retry stack deletion
+- **Doc**: TROUBLESHOOTING.md#uninstall-fails-s3-bucket-not-empty-delete_failed
+
+### INST002
+- **Pattern**: `DELETE_FAILED.*TemplateBucket`
+- **Severity**: permanent
+- **Tracked**: no (installer error)
+- **Category**: installer
+- **Cause**: CloudFormation stack deletion failed on S3 bucket resource
+- **Fix**: Empty bucket manually, then retry stack deletion
+- **Doc**: TROUBLESHOOTING.md#uninstall-fails-s3-bucket-not-empty-delete_failed
+
+### INST003
+- **Pattern**: `BucketNotEmpty`
+- **Severity**: permanent
+- **Tracked**: no (installer error)
+- **Category**: installer
+- **Cause**: S3 DeleteBucket API failed because bucket contains objects
+- **Fix**: Empty bucket (including versions), then delete
+- **Doc**: TROUBLESHOOTING.md#uninstall-fails-s3-bucket-not-empty-delete_failed
+
+### INST004
+- **Pattern**: `Waiter StackDeleteComplete failed.*DELETE_FAILED`
+- **Severity**: permanent
+- **Tracked**: no (installer error)
+- **Category**: installer
+- **Cause**: CloudFormation stack deletion failed - usually S3 bucket not empty
+- **Fix**: Run installer --uninstall again (it will retry after emptying bucket)
+- **Doc**: TROUBLESHOOTING.md#uninstall-fails-s3-bucket-not-empty-delete_failed
+
+### INST005
+- **Pattern**: `Stack is in DELETE_FAILED state`
+- **Severity**: informational
+- **Tracked**: no (installer message)
+- **Category**: installer
+- **Cause**: Previous uninstall attempt failed, installer will retry
+- **Note**: This is an informational message, not an error. The installer detects the failed state and will attempt recovery.
+- **Doc**: TROUBLESHOOTING.md#uninstall-fails-s3-bucket-not-empty-delete_failed
 
 ---
 

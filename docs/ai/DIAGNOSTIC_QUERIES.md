@@ -371,67 +371,30 @@ aws s3 ls s3://$BUCKET/templates/
 
 ## Soft Bounce Queries
 
-### Count soft bounces for a recipient (30-day window)
+### Check consecutive soft bounces for a recipient
 ```bash
-# Calculate 30 days ago
-WINDOW_START=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
-
+# Get last 3 emails to this address (most recent first)
 aws dynamodb query \
   --table-name {STACK}-EmailTracking \
   --index-name to-email-timestamp-index \
-  --key-condition-expression "toEmail = :email AND #ts >= :window" \
-  --filter-expression "#s = :status" \
-  --expression-attribute-names '{"#s": "status", "#ts": "timestamp"}' \
-  --expression-attribute-values "{\":email\": {\"S\": \"user@example.com\"}, \":status\": {\"S\": \"soft_bounced\"}, \":window\": {\"S\": \"$WINDOW_START\"}}"
+  --key-condition-expression "toEmail = :email" \
+  --expression-attribute-values '{":email": {"S": "user@example.com"}}' \
+  --scan-index-forward false \
+  --limit 3
 ```
 
-**Note:** If count >= 15 within 30 days, the email will be permanently suppressed (cross-campaign protection).
+**Note:** If all 3 most recent emails have status "soft_bounced", the address will be permanently suppressed.
 
-### Find all retry attempts for an email
+### Find soft bounce history for an email address
 ```bash
 aws dynamodb query \
   --table-name {STACK}-EmailTracking \
   --index-name to-email-timestamp-index \
   --key-condition-expression "toEmail = :email" \
-  --filter-expression "originalEmailId = :orig" \
-  --expression-attribute-values '{":email": {"S": "user@example.com"}, ":orig": {"S": "ORIGINAL_EMAIL_ID"}}'
+  --filter-expression "#s = :status" \
+  --expression-attribute-names '{"#s": "status"}' \
+  --expression-attribute-values '{":email": {"S": "user@example.com"}, ":status": {"S": "soft_bounced"}}'
 ```
-
----
-
-## Retry Queue Queries
-
-### Check Retry Queue depth
-```bash
-aws sqs get-queue-attributes \
-  --queue-url https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/{STACK}-RetryQueue \
-  --attribute-names ApproximateNumberOfMessages,ApproximateNumberOfMessagesDelayed
-```
-
-### View Retry Queue messages (without consuming)
-```bash
-aws sqs receive-message \
-  --queue-url https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/{STACK}-RetryQueue \
-  --max-number-of-messages 5 \
-  --visibility-timeout 0
-```
-
-**Message format:**
-```json
-{
-  "originalEmailData": {
-    "to": "recipient@example.com",
-    "templateName": "welcome",
-    "originalEmailId": "email-123"
-  },
-  "retryAttempt": 1,
-  "bounceHistory": [
-    {"timestamp": "...", "reason": "MailboxFull"}
-  ]
-}
-```
-
-**Note:** `retryAttempt` is always 1 (single retry only). If the retry also soft bounces, the email is marked as "failed" and the customer can decide whether to resend.
 
 ---
 
@@ -444,10 +407,17 @@ aws sqs get-queue-attributes \
   --attribute-names ApproximateNumberOfMessages
 ```
 
-### Check Retry DLQ depth
+### Check EmailQueue DLQ depth
 ```bash
 aws sqs get-queue-attributes \
-  --queue-url https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/{STACK}-RetryDLQ \
+  --queue-url https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/{STACK}-EmailQueueDLQ \
+  --attribute-names ApproximateNumberOfMessages
+```
+
+### Check Feedback Processor DLQ depth
+```bash
+aws sqs get-queue-attributes \
+  --queue-url https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/{STACK}-FeedbackProcessorDLQ \
   --attribute-names ApproximateNumberOfMessages
 ```
 
@@ -550,9 +520,8 @@ aws cloudformation describe-stacks --stack-name {STACK} \
 ```
 
 **Available alarms:**
-- `{STACK}-EventBridgeDLQDepthAlarm` - Failed EventBridge invocations
-- `{STACK}-RetryDLQDepthAlarm` - Failed retry attempts
-- `{STACK}-FeedbackDLQDepthAlarm` - Failed feedback processing
+- `{STACK}-EventBridgeDLQ-Depth` - Failed EventBridge invocations
+- `{STACK}-FeedbackDLQ-Depth` - Failed feedback processing
 - `{STACK}-EmailSenderErrorsAlarm` - Email Sender Lambda errors
 - `{STACK}-FeedbackProcessorErrorsAlarm` - Feedback Processor Lambda errors
 - `{STACK}-SESBounceRateAlarm` - SES bounce rate > 3%

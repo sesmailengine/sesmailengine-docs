@@ -10,24 +10,24 @@ SESMailEngine runs entirely within your AWS account using a serverless architect
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         YOUR AWS ACCOUNT                                     │
+│                         YOUR AWS ACCOUNT                                    │
 │                                                                             │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐ │
-│   │ EventBridge │───▶│   Lambda    │───▶│     SES     │───▶│  Recipient  │ │
-│   │  (TLS 1.2+) │    │ (Encrypted) │    │ (TLS Req.)  │    │             │ │
-│   └─────────────┘    └──────┬──────┘    └─────────────┘    └─────────────┘ │
+│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│   │ EventBridge │───▶│   Lambda    │───▶│     SES     │───▶│  Recipient  │  │
+│   │  (TLS 1.2+) │    │ (Encrypted) │    │ (TLS Req.)  │    │             │  │
+│   └─────────────┘    └──────┬──────┘    └─────────────┘    └─────────────┘  │
 │                             │                                               │
 │                    ┌────────┴────────┐                                      │
 │                    ▼                 ▼                                      │
-│             ┌─────────────┐   ┌─────────────┐                              │
-│             │  DynamoDB   │   │     S3      │                              │
-│             │ (SSE-KMS)   │   │ (SSE-S3)    │                              │
-│             └─────────────┘   └─────────────┘                              │
+│             ┌─────────────┐   ┌─────────────┐                               │
+│             │  DynamoDB   │   │     S3      │                               │
+│             │ (SSE-KMS)   │   │ (SSE-S3)    │                               │
+│             └─────────────┘   └─────────────┘                               │
 │                                                                             │
-│   ✓ All data encrypted at rest                                             │
-│   ✓ All traffic encrypted in transit (TLS 1.2+)                            │
-│   ✓ No external API calls                                                  │
-│   ✓ Least privilege IAM policies                                           │
+│   ✓ All data encrypted at rest                                              │
+│   ✓ All traffic encrypted in transit (TLS 1.2+)                             │
+│   ✓ No external API calls                                                   │
+│   ✓ Least privilege IAM policies                                            │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -44,7 +44,7 @@ All data stored by SESMailEngine is encrypted at rest using AWS-managed encrypti
 | DynamoDB (EmailTracking) | SSE with AWS-managed keys | AWS KMS (automatic) |
 | DynamoDB (Suppression) | SSE with AWS-managed keys | AWS KMS (automatic) |
 | S3 (Templates) | AES-256 with S3 Bucket Keys | AWS-managed |
-| SQS (Retry Queue) | SSE with SQS-managed keys | AWS-managed |
+| SQS (Email Queue) | SSE with SQS-managed keys | AWS-managed |
 | SQS (Dead Letter Queues) | SSE with SQS-managed keys | AWS-managed |
 
 **CloudFormation Configuration:**
@@ -168,9 +168,11 @@ Email tracking data is automatically deleted after a configurable retention peri
 | Parameter | Default | Range | Purpose |
 |-----------|---------|-------|---------|
 | `DataRetentionDays` | 90 days | 30-365 days | GDPR Article 5(1)(e) compliance |
+| `LogRetentionDays` | 90 days | 1-3653 days | CloudWatch log retention (cost optimization) |
 
 **Implementation:**
 - DynamoDB TTL automatically deletes records after the retention period
+- CloudWatch logs are automatically deleted after the log retention period
 - No manual intervention required
 - Configurable at deployment time
 
@@ -186,6 +188,7 @@ TimeToLiveSpecification:
 |-------|-------------|-----------|
 | EmailTracking | Email ID, recipient, subject, status, timestamps | Configurable (default 90 days) |
 | Suppression | Email address, suppression reason, date | Permanent (required for compliance) |
+| CloudWatch Logs | Lambda execution logs, errors, debug info | Configurable (default 90 days) |
 
 **Note:** Email content (body) is NOT stored. Only metadata is retained for tracking purposes.
 
@@ -227,7 +230,7 @@ SESMailEngine supports GDPR compliance through:
 | **Article 5(1)(e)** - Storage limitation | Configurable data retention (30-365 days) |
 | **Article 5(1)(f)** - Integrity and confidentiality | Encryption at rest and in transit |
 | **Article 17** - Right to erasure | Suppression list + DynamoDB TTL |
-| **Article 25** - Data protection by design | Minimal data collection, no email body storage |
+| **Article 25** - Data protection by design | Minimal data collection|
 | **Article 32** - Security of processing | AWS encryption, IAM least privilege |
 | **Article 33** - Breach notification | CloudWatch alarms, CloudTrail logging |
 

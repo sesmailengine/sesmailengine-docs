@@ -116,29 +116,33 @@ Configuration Summary
 
 Proceed with installation? [Y/n]: 
 
-[1/7] Creating S3 bucket...
+[1/8] Creating S3 bucket...
 ✓ Created S3 bucket: my-company-sesmailengine
 
-[2/7] Uploading Lambda packages...
+[2/8] Uploading Lambda packages...
   Uploading email-sender.zip...
   Uploading feedback-processor.zip...
   Uploading template-seeder.zip...
 ✓ Uploaded all Lambda packages
 
-[3/7] Uploading starter templates...
+[3/8] Uploading starter templates...
 ✓ Uploaded 8 starter templates
 
-[4/7] Deploying CloudFormation stack...
+[4/8] Uploading CloudFormation template...
+  Uploading template.yaml...
+✓ Uploaded CloudFormation template
+
+[5/8] Deploying CloudFormation stack...
 ✓ Started CloudFormation stack creation: sesmailengine
 
-[5/7] Waiting for stack creation...
+[6/8] Waiting for stack creation...
   Waiting for stack creation (this takes 2-3 minutes)...
 ✓ Stack created successfully
 
-[6/7] Retrieving stack outputs...
+[7/8] Retrieving stack outputs...
 ✓ Retrieved stack configuration
 
-[7/7] Installing starter templates...
+[8/8] Installing starter templates...
 ✓ Installed 8 starter templates: welcome, password-reset, ...
 
 ╔═══════════════════════════════════════════════════════════════╗
@@ -279,15 +283,60 @@ These can be customized after deployment via CloudFormation:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `Environment` | `prod` | Environment name (`dev`, `staging`, `prod`) |
-| `BounceRateThreshold` | `5` | Max bounce rate % before blocking sends (1-10) |
+| `Environment` | `prod` | Environment name (`dev`, `staging`, `prod`) - used for resource tagging only |
 | `DataRetentionDays` | `90` | Days to retain email tracking data (30-365) |
+| `LogRetentionDays` | `90` | Days to retain CloudWatch logs (1-3653). Reduces CloudWatch costs. |
+| `ConsecutiveSoftBounceThreshold` | `3` | Consecutive soft bounces before suppressing address (2-10) |
 | `EmailSenderMemory` | `512` | Lambda memory in MB (256, 512, 1024) |
 | `EmailSenderTimeout` | `30` | Lambda timeout in seconds (10-60) |
-| `EmailSenderConcurrency` | `14` | Max concurrent Lambda executions |
+| `EmailSenderConcurrency` | `5` | Max concurrent Lambda executions (match your SES MaxSendRate) |
 | `FeedbackProcessorMemory` | `256` | Lambda memory in MB (128, 256, 512) |
 | `FeedbackProcessorTimeout` | `15` | Lambda timeout in seconds (5-30) |
 | `RetainDataOnDelete` | `true` | Keep DynamoDB tables and S3 bucket when stack is deleted |
+
+### CloudWatch Alarm Parameters
+
+These parameters control when CloudWatch alarms trigger:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `BounceRateAlarmThreshold` | `0.03` | SES bounce rate threshold (decimal). 0.03 = 3%. AWS reviews at 5%, suspends at 10%. |
+| `ComplaintRateAlarmThreshold` | `0.0005` | SES complaint rate threshold (decimal). 0.0005 = 0.05%. AWS reviews at 0.1%, suspends at 0.5%. |
+| `ReputationAlarmPeriod` | `3600` | Evaluation period for SES reputation alarms in seconds (300, 900, 1800, 3600) |
+| `LambdaErrorAlarmThreshold` | `50` | Lambda errors per 5-minute period to trigger alarm (1-1000) |
+| `LambdaErrorAlarmEvaluationPeriods` | `2` | Consecutive 5-minute periods that must breach threshold (1-10) |
+
+#### Lambda Error Alarm Tuning Guide
+
+The `LambdaErrorAlarmThreshold` and `LambdaErrorAlarmEvaluationPeriods` parameters let you tune alerting sensitivity based on your email volume:
+
+| Email Volume | Recommended Threshold | Rationale |
+|--------------|----------------------|-----------|
+| Low (<1K emails/day) | 10-20 | Even a few errors matter |
+| Medium (1K-10K/day) | 50 (default) | Balanced sensitivity |
+| High (10K-100K/day) | 100-200 | Avoid noise from normal variance |
+| Very High (>100K/day) | 200-500 | Focus on sustained issues |
+
+**Example configurations:**
+
+```bash
+# Low-volume system: Alert on 10+ errors for 2 consecutive periods
+aws cloudformation update-stack \
+  --stack-name sesmailengine \
+  --use-previous-template \
+  --parameters \
+    ParameterKey=LambdaErrorAlarmThreshold,ParameterValue=10 \
+  --capabilities CAPABILITY_NAMED_IAM
+
+# High-volume system: Alert on 200+ errors for 3 consecutive periods (15 min)
+aws cloudformation update-stack \
+  --stack-name sesmailengine \
+  --use-previous-template \
+  --parameters \
+    ParameterKey=LambdaErrorAlarmThreshold,ParameterValue=200 \
+    ParameterKey=LambdaErrorAlarmEvaluationPeriods,ParameterValue=3 \
+  --capabilities CAPABILITY_NAMED_IAM
+```
 
 ---
 
@@ -497,7 +546,6 @@ After deployment, these outputs are available:
 | `TemplateSeederLambdaName` | Template Seeder Lambda function name |
 | `InstallTemplatesCommand` | AWS CLI command to install starter templates |
 | `AlarmNotificationTopicArn` | SNS topic for CloudWatch alarm notifications |
-| `RetryQueueUrl` | SQS queue URL for email retries |
 | `SESConfigurationSetName` | SES configuration set name |
 
 View all outputs:
@@ -552,16 +600,24 @@ The stack creates several CloudWatch alarms to monitor system health:
 | Alarm | Trigger | Action |
 |-------|---------|--------|
 | EventBridge DLQ Depth | Messages in DLQ > 0 | Check failed email requests |
-| Retry DLQ Depth | Messages in DLQ > 0 | Check failed retry attempts |
+| Email Queue DLQ Depth | Messages in DLQ > 0 | Check failed email processing |
 | Feedback DLQ Depth | Messages in DLQ > 0 | Check failed feedback processing |
-| Email Sender Errors | Lambda errors > 50 (sustained) | Check Lambda logs |
-| Feedback Processor Errors | Lambda errors > 50 (sustained) | Check Lambda logs |
-| SES Bounce Rate | Bounce rate > 3% | Clean email list, review sending practices |
-| SES Complaint Rate | Complaint rate > 0.05% | Review email content and targeting |
+| Email Sender Errors | Lambda errors > threshold (sustained) | Check Lambda logs |
+| Feedback Processor Errors | Lambda errors > threshold (sustained) | Check Lambda logs |
+| SES Bounce Rate | Bounce rate > threshold | Clean email list, review sending practices |
+| SES Complaint Rate | Complaint rate > threshold | Review email content and targeting |
 
 All alarms send notifications to the email address specified during installation.
 
-**Important:** SES bounce rate alarms trigger at 3% (AWS suspends accounts at ~5%). Complaint rate alarms trigger at 0.05% (AWS suspends at ~0.1%). Monitor these closely to protect your SES reputation.
+### Default Alarm Thresholds
+
+| Alarm | Default Threshold | AWS Suspension Level |
+|-------|-------------------|---------------------|
+| SES Bounce Rate | 3% (`BounceRateAlarmThreshold=0.03`) | 5% review, 10% suspend |
+| SES Complaint Rate | 0.05% (`ComplaintRateAlarmThreshold=0.0005`) | 0.1% review, 0.5% suspend |
+| Lambda Errors | 50 errors/5min for 2 periods (`LambdaErrorAlarmThreshold=50`) | N/A |
+
+These thresholds are configurable via CloudFormation parameters. See [CloudWatch Alarm Parameters](#cloudwatch-alarm-parameters) for tuning guidance.
 
 ---
 

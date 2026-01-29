@@ -269,9 +269,7 @@ aws dynamodb get-item \
 |-------|--------|
 | Hard bounce (address doesn't exist) | Immediately suppressed |
 | Spam complaint | Immediately suppressed |
-| 15+ soft bounces in 30 days | Promoted to permanent suppression |
-
-**Note:** A single failed email chain (retry exhausted) does NOT suppress the address. The email is marked as "failed" and you can resend if appropriate.
+| 3 consecutive soft bounces | Permanently suppressed |
 
 ### Check if Email is Suppressed
 ```bash
@@ -282,10 +280,8 @@ aws dynamodb get-item \
 
 **If item exists:** Email is blocked. Check `reason`:
 - `hard-bounce` - Address doesn't exist
-- `soft-bounce-exceeded` - 15+ soft bounces in 30 days
+- `consecutive-soft-bounces` - 3+ consecutive soft bounces to this address
 - `spam-complaint` - User reported spam
-
-**Note:** If an email has `failed` status (retry exhausted), the address is NOT suppressed. You can resend if appropriate.
 
 ### Remove from Suppression (Use with Caution!)
 ```bash
@@ -338,37 +334,35 @@ Options:
 
 ---
 
-## Soft Bounce Retry System
+## Soft Bounce Handling
 
 ### How It Works
 
+SESMailEngine includes automatic soft bounce retries via AWS SES (up to 12 hours). If delivery ultimately fails, the address is tracked as `soft_bounced`.
+
 1. Soft bounce received (MailboxFull, etc.)
-2. Email queued for single retry (15-minute delay)
-3. Retry attempt made
-4. If retry succeeds → delivered
-5. If retry fails → marked as "failed" (NOT suppressed)
-6. Customer can resend if appropriate
+2. AWS SES automatically retries delivery for up to 12 hours
+3. If SES succeeds → status becomes "delivered"
+4. If SES exhausts retries → status remains "soft_bounced"
+5. If 3 consecutive soft bounces to same address → permanently suppressed
 
-### Cross-Campaign Protection
+### Consecutive Soft Bounce Protection
 
-If an email address accumulates 15+ soft bounces within a 30-day rolling window (across all campaigns), it is permanently suppressed. This protects against truly problematic addresses while avoiding aggressive suppression from a single failed email chain.
+If an email address receives 3 consecutive soft bounces (configurable), it is permanently suppressed. This protects against truly problematic addresses.
 
-### Retry Timeline
-```
-T+0:00  - Original send, soft bounce
-T+0:15  - Retry attempt
-T+0:15+ - If retry fails → status "failed" (you can resend)
-```
+| Consecutive Soft Bounces | Action |
+|--------------------------|--------|
+| 1-2 | Status updated to "soft_bounced", no suppression |
+| 3+ | Address added to suppression list |
 
-### Understanding "failed" vs "suppressed"
+### Understanding "soft_bounced" vs "bounced"
 
-| Status | Meaning | Can Resend? |
+| Status | Meaning | Suppressed? |
 |--------|---------|-------------|
-| `failed` | Retry exhausted, but address NOT suppressed | Yes - your choice |
-| `bounced` | Hard bounce, address permanently suppressed | No - will be blocked |
-| `soft_bounced` | Temporary failure, retry scheduled | Wait for retry result |
+| `soft_bounced` | Temporary failure, SES retried for up to 12 hours | No (unless 3+ consecutive) |
+| `bounced` | Permanent failure (address doesn't exist) | Yes - immediately |
 
-### Check Retry Status
+### Check Soft Bounce History
 ```bash
 aws dynamodb query \
   --table-name {STACK}-EmailTracking \
@@ -427,9 +421,8 @@ aws lambda invoke \
 
 | Alarm | Trigger | Severity |
 |-------|---------|----------|
-| `EventBridgeDLQDepthAlarm` | Failed Lambda invocations | Medium |
-| `RetryDLQDepthAlarm` | Failed retry attempts | Medium |
-| `FeedbackDLQDepthAlarm` | Failed feedback processing | Medium |
+| `EventBridgeDLQ-Depth` | Failed Lambda invocations | Medium |
+| `FeedbackDLQ-Depth` | Failed feedback processing | Medium |
 | `EmailSenderErrorsAlarm` | Lambda errors | Medium |
 | `FeedbackProcessorErrorsAlarm` | Lambda errors | Medium |
 | `SESBounceRateAlarm` | Bounce rate > 3% | **Critical** |
