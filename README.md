@@ -8,7 +8,7 @@
 
 🌐 **[Get SESMailEngine at sesmailengine.com](https://www.sesmailengine.com)** - Purchase, download, and get support
 
-SESMailEngine is AWS-native email infrastructure that solves the scattered email logic problem. Instead of managing email code across multiple Lambda functions, get a centralized solution that scales to zero when idle and avoids recurring monthly contracts.
+SESMailEngine is AWS-native email infrastructure that protects your SES reputation. By centralizing all email sending through one controlled path, it prevents the architecture mistakes that silently damage your sender reputation. Scales to zero when idle, no recurring monthly contracts.
 
 ## The SES Reputation Problem
 
@@ -31,6 +31,19 @@ This feels fine at first. But now you have:
 - ❌ No way to stop bad sends centrally
 
 **SES reputation is account-wide.** One misbehaving Lambda, one bad import, one forgotten suppression check can silently damage everything that sends email from your account.
+
+### The AI Agent Risk
+
+A growing threat: **AI agents with direct SES access via tool calling.**
+
+When you give an AI coding assistant or autonomous agent the ability to call AWS APIs directly, you're trusting it to never hallucinate an email address. But AI models do hallucinate — they generate plausible-looking but invalid email addresses, especially when:
+- Inferring recipient addresses from context
+- Auto-completing partially provided addresses
+- Generating test data that accidentally gets sent
+
+Each hallucinated email that bounces damages your SES reputation. Unlike human mistakes that happen occasionally, an AI agent can generate hundreds of bad sends in minutes before anyone notices.
+
+**The fix:** Never give AI agents direct SES access. Route all email through a controlled path with suppression checks — exactly what SESMailEngine provides.
 
 ### What AWS Tells You
 
@@ -121,7 +134,7 @@ We ran into this problem ourselves while operating multiple AWS workloads using 
 
 ### 🔒 No Silent Failures
 - **Three Dead Letter Queues** capture every failure type
-- **Automatic retries** for soft bounces with intelligent backoff
+- **Soft bounce handling** - AWS SES retries automatically for up to 12 hours
 - **All data encrypted at rest** across S3, DynamoDB, and SQS
 - **Comprehensive error tracking** with detailed failure reasons
 
@@ -262,7 +275,7 @@ When an email status changes, the Feedback Processor publishes an "Email Status 
 ### Available Status Events
 - **delivered** - Email successfully delivered to recipient's mail server
 - **bounced** - Permanent delivery failure (address doesn't exist)
-- **soft_bounced** - Temporary failure (mailbox full, will retry)
+- **soft_bounced** - Temporary failure (mailbox full, AWS SES retries for up to 12 hours)
 - **complained** - Recipient marked email as spam
 - **opened** - Recipient opened the email
 
